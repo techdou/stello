@@ -1,9 +1,17 @@
 import type { LLMAdapter } from '@stello-ai/session'
 import type {
   SessionCompatibleConsolidateFn,
-  SessionCompatibleIntegrateFn,
   SessionCompatibleCompressFn,
 } from '../adapters/session-runtime.js'
+
+/** integrate 函数签名（消费所有子 L2，输出 synthesis + insights） */
+type SessionCompatibleIntegrateFn = (
+  children: Array<{ sessionId: string; label: string; l2: string }>,
+  currentSynthesis: string | null,
+) => Promise<{
+  synthesis: string
+  insights: Array<{ sessionId: string; content: string }>
+}>
 
 /** 最小 LLM 调用接口，仅用于 consolidation/integration 内置默认实现 */
 export type LLMCallFn = (

@@ -65,11 +65,9 @@ export {
 export type {
   SessionRuntimeAdapterOptions,
   SessionCompatible,
-  MainSessionCompatible,
   SessionCompatibleToolCall,
   SessionCompatibleSendResult,
   SessionCompatibleConsolidateFn,
-  SessionCompatibleIntegrateFn,
   SessionCompatibleCompressFn,
   SessionCompatibleForkOptions,
 } from './adapters/session-runtime';
@@ -141,7 +139,6 @@ export type { LLMCallFn, DefaultFnOptions } from './llm/defaults';
 
 // Re-export @stello-ai/session 常用接口，core 用户无需额外 import session 包
 export { createSession, loadSession } from '@stello-ai/session';
-export { createMainSession, loadMainSession } from '@stello-ai/session';
 export { createClaude } from '@stello-ai/session';
 export { createGPT } from '@stello-ai/session';
 export { createOpenAICompatibleAdapter } from '@stello-ai/session';
@@ -159,18 +156,18 @@ export type {
   OpenAICompatibleOptions,
   AnthropicAdapterOptions,
   // Session API
-  Session, MainSession, SendResult, StreamResult,
+  Session, SendResult, StreamResult,
   MessageQueryOptions,
   // Session 元数据
   SessionMetaUpdate, SessionFilter,
   // Fork
   ForkOptions, ForkContextFn,
   // 存储
-  SessionStorage, MainStorage, ListRecordsOptions,
+  SessionStorage, ListRecordsOptions,
   // 函数签名
-  CompressFn, ConsolidateFn, IntegrateFn, IntegrateResult, ChildL2Summary,
+  CompressFn, ConsolidateFn,
   CreateSessionOptions as SessionCreateOptions,
-  LoadSessionOptions, CreateMainSessionOptions, LoadMainSessionOptions,
+  LoadSessionOptions,
   // 工具
   Tool, CallToolResult, ToolAnnotations,
 } from '@stello-ai/session';

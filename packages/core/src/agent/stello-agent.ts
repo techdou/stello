@@ -18,7 +18,6 @@ import {
   adaptSessionToEngineRuntime,
   serializeSessionSendResult,
   sessionSendResultParser,
-  type MainSessionCompatible,
   type SessionCompatible,
   type SessionCompatibleSendResult,
 } from '../adapters/session-runtime';
@@ -58,7 +57,7 @@ export interface StelloAgentSessionConfig {
   }>;
   /** 加载 MainSession 与其固化配置（可选，仅在需要 integration 时提供） */
   mainSessionLoader?: () => Promise<{
-    session: MainSessionCompatible;
+    session: { integrate(): Promise<unknown> };
     config: SerializableSessionConfig | null;
   } | null>;
   /** send() 结果序列化方式，默认 JSON 序列化 */

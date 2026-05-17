@@ -35,15 +35,6 @@ export type SessionCompatibleCompressFn = (
   messages: Array<{ role: string; content: string; timestamp?: string }>,
 ) => Promise<string>;
 
-/** 结构兼容 @stello-ai/session 的 integrate 函数签名 */
-export type SessionCompatibleIntegrateFn = (
-  children: Array<{ sessionId: string; label: string; l2: string }>,
-  currentSynthesis: string | null,
-) => Promise<{
-  synthesis: string;
-  insights: Array<{ sessionId: string; content: string }>;
-}>;
-
 /** 结构兼容 @stello-ai/session 的 ForkOptions */
 export interface SessionCompatibleForkOptions {
   id?: string;
@@ -87,11 +78,6 @@ export interface SessionCompatible {
   readonly tools?: LLMCompleteOptions['tools'];
   /** Replace tool list (forwards to underlying Session.setTools) */
   setTools(tools: LLMCompleteOptions['tools'] | undefined): void;
-}
-
-/** 结构兼容 @stello-ai/session 的 MainSession */
-export interface MainSessionCompatible {
-  integrate(): Promise<unknown>;
 }
 
 /** Session -> EngineRuntime 适配配置 */
