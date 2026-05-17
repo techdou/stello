@@ -2,6 +2,8 @@
 
 ## 0.8.0
 
+> **迁移指南**：[`docs/migration-main-session-decouple.md`](../../docs/migration-main-session-decouple.md) 含心智模型转变、删除清单、迁移配方与 orchestrator 重建示例。
+
 ### Breaking
 
 - 删除 `MainSession` 接口、`createMainSession` / `loadMainSession` 工厂、`CreateMainSessionOptions` / `LoadMainSessionOptions` 选项
