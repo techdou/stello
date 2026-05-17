@@ -7,27 +7,6 @@ export type ConsolidateFn = (currentMemory: string | null, messages: Message[]) 
 /** 上下文压缩函数签名：接收需压缩的消息列表，返回摘要文本 */
 export type CompressFn = (messages: Message[]) => Promise<string>
 
-/** 子 Session 的 L2 摘要，供 IntegrateFn 消费 */
-export interface ChildL2Summary {
-  sessionId: string
-  label: string
-  l2: string
-}
-
-/** IntegrateFn 的返回结果 */
-export interface IntegrateResult {
-  /** Main Session 的综合认知 */
-  synthesis: string
-  /** 推送给各子 Session 的定向 insights */
-  insights: Array<{ sessionId: string; content: string }>
-}
-
-/** integrate 函数签名：所有子 L2 + 当前 synthesis → 新 synthesis + per-child insights */
-export type IntegrateFn = (
-  children: ChildL2Summary[],
-  currentSynthesis: string | null
-) => Promise<IntegrateResult>
-
 /** createSession() 的选项 */
 export interface CreateSessionOptions {
   /** 指定 session ID（用于与拓扑节点对齐）。不提供则自动生成。 */
@@ -63,42 +42,6 @@ export interface LoadSessionOptions {
   compressFn?: CompressFn
   /** L3 → L2 提炼函数，加载时绑定，供 consolidate() 调用 */
   consolidateFn?: ConsolidateFn
-
-}
-
-/** createMainSession() 的选项 */
-export interface CreateMainSessionOptions {
-  /** 指定存储适配器 */
-  storage: SessionStorage
-  /** 指定 LLM 适配器 */
-  llm?: LLMAdapter
-  /** Main Session 标签 */
-  label?: string
-  /** 系统提示词 */
-  systemPrompt?: string
-  /** 可用工具定义 */
-  tools?: LLMCompleteOptions['tools']
-  /** 上下文压缩函数（超阈值时调用） */
-  compressFn?: CompressFn
-  /** 所有子 L2 → synthesis + insights，创建时绑定，供 integrate() 调用 */
-  integrateFn?: IntegrateFn
-
-}
-
-/** loadMainSession() 的选项 */
-export interface LoadMainSessionOptions {
-  /** 指定存储适配器 */
-  storage: SessionStorage
-  /** LLM 适配器 */
-  llm?: LLMAdapter
-  /** 系统提示词 */
-  systemPrompt?: string
-  /** 可用工具定义 */
-  tools?: LLMCompleteOptions['tools']
-  /** 上下文压缩函数（超阈值时调用） */
-  compressFn?: CompressFn
-  /** 所有子 L2 → synthesis + insights，加载时绑定，供 integrate() 调用 */
-  integrateFn?: IntegrateFn
 
 }
 

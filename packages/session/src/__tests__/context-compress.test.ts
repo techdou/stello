@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { makeSession, createMockLLM } from './helpers.js'
-import { createMainSession } from '../create-main-session.js'
+import { createSession } from '../create-session.js'
 import { InMemoryStorageAdapter } from '../mocks/in-memory-storage.js'
 import { SessionArchivedError } from '../types/session-api.js'
 import type { LLMResult, Message, LLMAdapter } from '../types/llm.js'
@@ -220,8 +220,8 @@ describe('自动压缩 — Session', () => {
   })
 })
 
-describe('自动压缩 — MainSession', () => {
-  it('超阈值时使用 compressFn 压缩（synthesis 保留）', async () => {
+describe('自动压缩 — Session（compress + insight 共存）', () => {
+  it('超阈值时使用 compressFn 压缩（insight 保留）', async () => {
     const capturedMessages: Message[][] = []
     const storage = new InMemoryStorageAdapter()
     const llm = createMockLLMWithContext([simpleResponse], 50)
@@ -233,26 +233,26 @@ describe('自动压缩 — MainSession', () => {
 
     const compressFn: CompressFn = vi.fn(async () => 'main compressed')
 
-    const mainSession = await createMainSession({ storage, llm, compressFn })
-    const id = mainSession.meta.id
+    const session = await createSession({ storage, llm, compressFn, label: 'Test Root' })
+    const id = session.meta.id
 
-    await storage.putMemory(id, 'global synthesis')
+    await storage.putInsight(id, 'global insight')
     for (let i = 0; i < 10; i++) {
       await storage.appendRecord(id, { role: 'user', content: `msg ${i} with padding` })
       await storage.appendRecord(id, { role: 'assistant', content: `reply ${i} with padding` })
     }
 
-    await mainSession.send('new')
+    await session.send('new')
 
     const call = capturedMessages[0]!
-    // synthesis 仍在上下文中
-    expect(call.some(m => m.content === 'global synthesis')).toBe(true)
+    // insight 仍在上下文中
+    expect(call.some(m => m.content === 'global insight')).toBe(true)
     // 压缩摘要也在上下文中
     expect(call.some(m => m.content === 'main compressed')).toBe(true)
     expect(call.length).toBeLessThan(22)
   })
 
-  it('未传 compressFn 时 MainSession 自动使用内置 LLM 压缩（synthesis 保留）', async () => {
+  it('未传 compressFn 时 Session 自动使用内置 LLM 压缩（insight 保留）', async () => {
     const capturedMessages: Message[][] = []
     const storage = new InMemoryStorageAdapter()
     const compressResponse: LLMResult = { content: 'main builtin compressed', usage: { promptTokens: 10, completionTokens: 5 } }
@@ -263,37 +263,37 @@ describe('自动压缩 — MainSession', () => {
       return origComplete(msgs)
     }
 
-    const mainSession = await createMainSession({ storage, llm })
-    const id = mainSession.meta.id
+    const session = await createSession({ storage, llm, label: 'Test Root' })
+    const id = session.meta.id
 
-    await storage.putMemory(id, 'global synthesis')
+    await storage.putInsight(id, 'global insight')
     for (let i = 0; i < 10; i++) {
       await storage.appendRecord(id, { role: 'user', content: `msg ${i} with padding` })
       await storage.appendRecord(id, { role: 'assistant', content: `reply ${i} with padding` })
     }
 
-    await mainSession.send('new')
+    await session.send('new')
 
     // 第二次调用是实际 send
     const sendCall = capturedMessages[1]!
-    expect(sendCall.some(m => m.content === 'global synthesis')).toBe(true)
+    expect(sendCall.some(m => m.content === 'global insight')).toBe(true)
     expect(sendCall.some(m => m.content === 'main builtin compressed')).toBe(true)
     expect(sendCall.length).toBeLessThan(22)
   })
 
-  it('MainSession trimRecords 正常工作', async () => {
+  it('Session trimRecords 正常工作', async () => {
     const storage = new InMemoryStorageAdapter()
-    const mainSession = await createMainSession({ storage })
-    const id = mainSession.meta.id
+    const session = await createSession({ storage, label: 'Test Root' })
+    const id = session.meta.id
 
     await storage.appendRecord(id, { role: 'user', content: 'a' })
     await storage.appendRecord(id, { role: 'assistant', content: 'b' })
     await storage.appendRecord(id, { role: 'user', content: 'c' })
     await storage.appendRecord(id, { role: 'assistant', content: 'd' })
 
-    await mainSession.trimRecords(2)
+    await session.trimRecords(2)
 
-    const msgs = await mainSession.messages()
+    const msgs = await session.messages()
     expect(msgs).toHaveLength(2)
     expect(msgs[0]!.content).toBe('c')
   })

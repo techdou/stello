@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { createSession } from '../create-session.js'
-import { createMainSession } from '../create-main-session.js'
 import { InMemoryStorageAdapter } from '../mocks/in-memory-storage.js'
 import { createOpenAICompatibleAdapter } from '../adapters/openai-compatible.js'
 import { createAnthropicAdapter } from '../adapters/anthropic.js'
@@ -53,30 +52,6 @@ function defineLLMTests(getLLM: () => LLMAdapter) {
   }, 60_000)
 }
 
-/** MainSession 集成测试用例 */
-function defineMainSessionLLMTests(getLLM: () => LLMAdapter) {
-  it('MainSession 单轮对话：send() 返回非空内容并存 L3', async () => {
-    const storage = new InMemoryStorageAdapter()
-    const main = await createMainSession({
-      storage,
-      llm: getLLM(),
-      systemPrompt: '你是一个简洁的助手，用一句话回答问题',
-    })
-
-    const result = await main.send('1+1等于几？')
-    console.log('[MainSession 单轮] content:', result.content)
-    console.log('[MainSession 单轮] usage:', result.usage)
-
-    expect(result.content).toBeTruthy()
-    expect(result.usage).toBeDefined()
-
-    const messages = await main.messages()
-    expect(messages).toHaveLength(2)
-    expect(messages[0]!.role).toBe('user')
-    expect(messages[1]!.role).toBe('assistant')
-  }, 30_000)
-}
-
 // --- OpenAI 兼容协议（MiniMax / DeepSeek / OpenAI 等） ---
 
 const openaiKey = process.env.OPENAI_API_KEY
@@ -95,7 +70,6 @@ describe.skipIf(!openaiKey)('OpenAI 兼容集成测试', () => {
     })
   }
   defineLLMTests(() => llm)
-  defineMainSessionLLMTests(() => llm)
 })
 
 // --- Anthropic 原生协议 ---
@@ -115,5 +89,4 @@ describe.skipIf(!anthropicKey)('Anthropic 集成测试', () => {
     })
   }
   defineLLMTests(() => llm)
-  defineMainSessionLLMTests(() => llm)
 })
