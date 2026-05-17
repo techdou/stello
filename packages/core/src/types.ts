@@ -43,7 +43,5 @@ export type {
 // Session 统一配置
 export type {
   SessionConfig,
-  MainSessionConfig,
   SerializableSessionConfig,
-  SerializableMainSessionConfig,
 } from './types/session-config';

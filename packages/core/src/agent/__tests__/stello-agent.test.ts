@@ -328,17 +328,17 @@ describe('StelloAgent', () => {
   });
 
   it('会保留 mainSessionConfig 独立配置（不参与 fork 合成链）', () => {
-    const integrateFn = vi.fn();
+    const consolidateFn = vi.fn();
     const agent = createStelloAgent({
       ...baseConfig(),
       mainSessionConfig: {
         systemPrompt: 'main prompt',
-        integrateFn,
+        consolidateFn,
       },
     });
 
     expect(agent.config.mainSessionConfig?.systemPrompt).toBe('main prompt');
-    expect(agent.config.mainSessionConfig?.integrateFn).toBe(integrateFn);
+    expect(agent.config.mainSessionConfig?.consolidateFn).toBe(consolidateFn);
   });
 
   it('updateConfig 可热更新 runtime 配置', async () => {
@@ -548,7 +548,7 @@ describe('StelloAgent', () => {
       });
     });
 
-    it('createMainSession 剔除非可序列化字段（llm/integrateFn 等）', async () => {
+    it('createMainSession 剔除非可序列化字段（llm/consolidateFn 等）', async () => {
       const sessions = sessionsMock();
       const dummyLlm = { complete: vi.fn() } as never;
       const dummyFn = vi.fn();
@@ -563,7 +563,7 @@ describe('StelloAgent', () => {
         mainSessionConfig: {
           systemPrompt: 'P',
           llm: dummyLlm,
-          integrateFn: dummyFn,
+          consolidateFn: dummyFn,
         },
       });
 
@@ -572,7 +572,7 @@ describe('StelloAgent', () => {
       expect(sessions.putConfig).toHaveBeenCalledWith('root', { systemPrompt: 'P' });
       const stored = sessions.store.get('root') as Record<string, unknown>;
       expect(stored).not.toHaveProperty('llm');
-      expect(stored).not.toHaveProperty('integrateFn');
+      expect(stored).not.toHaveProperty('consolidateFn');
     });
 
     it('createMainSession 无 mainSessionConfig 时写入空对象', async () => {

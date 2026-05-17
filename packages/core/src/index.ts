@@ -42,9 +42,7 @@ export type {
   SessionRuntimeResolver,
   // Session 统一配置类型
   SessionConfig,
-  MainSessionConfig,
   SerializableSessionConfig,
-  SerializableMainSessionConfig,
 } from './types';
 
 export type { ToolExecutionContext } from './types/tool';

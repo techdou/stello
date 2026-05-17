@@ -29,8 +29,6 @@ import type { EngineLifecycleAdapter, EngineToolRuntime } from '../engine/stello
 import type { ForkProfileRegistry } from '../engine/fork-profile';
 import type { SplitGuard } from '../session/split-guard';
 import type {
-  MainSessionConfig,
-  SerializableMainSessionConfig,
   SerializableSessionConfig,
   SessionConfig,
 } from '../types/session-config';
@@ -61,7 +59,7 @@ export interface StelloAgentSessionConfig {
   /** 加载 MainSession 与其固化配置（可选，仅在需要 integration 时提供） */
   mainSessionLoader?: () => Promise<{
     session: MainSessionCompatible;
-    config: SerializableMainSessionConfig | null;
+    config: SerializableSessionConfig | null;
   } | null>;
   /** send() 结果序列化方式，默认 JSON 序列化 */
   serializeSendResult?: (result: SessionCompatibleSendResult) => string;
@@ -100,7 +98,7 @@ export interface StelloAgentConfig {
   /** Regular session 的 agent 级默认配置，fork 合成链的最低优先级 */
   sessionDefaults?: SessionConfig;
   /** Main session 独立配置（不参与 fork 合成链） */
-  mainSessionConfig?: MainSessionConfig;
+  mainSessionConfig?: SessionConfig;
   session?: StelloAgentSessionConfig;
   capabilities: StelloAgentCapabilitiesConfig;
   runtime?: StelloAgentRuntimeConfig;
@@ -132,11 +130,11 @@ function resolveRuntimeResolver(config: StelloAgentConfig): SessionRuntimeResolv
   );
 }
 
-/** 从 MainSessionConfig 抽取可序列化子集 */
+/** 从 SessionConfig 抽取 main session 可序列化子集 */
 function serializeMainSessionConfig(
-  config: MainSessionConfig | undefined,
-): SerializableMainSessionConfig {
-  const result: SerializableMainSessionConfig = {};
+  config: SessionConfig | undefined,
+): SerializableSessionConfig {
+  const result: SerializableSessionConfig = {};
   if (config?.systemPrompt !== undefined) result.systemPrompt = config.systemPrompt;
   if (config?.skills !== undefined) result.skills = config.skills;
   return result;
