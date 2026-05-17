@@ -129,10 +129,8 @@ export { createSessionTool, activateSkillTool } from './builtin-tools';
 // 导出 LLM 默认实现
 export {
   createDefaultConsolidateFn,
-  createDefaultIntegrateFn,
   createDefaultCompressFn,
   DEFAULT_CONSOLIDATE_PROMPT,
-  DEFAULT_INTEGRATE_PROMPT,
   DEFAULT_COMPRESS_PROMPT,
 } from './llm/defaults';
 export type { LLMCallFn, DefaultFnOptions } from './llm/defaults';
