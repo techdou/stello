@@ -49,9 +49,6 @@ export type {
 
 export type { ToolExecutionContext } from './types/tool';
 
-// 导出常量
-export { MAIN_SESSION_ID } from './types/session';
-
 // 导出实现
 export { NodeFileSystemAdapter } from './fs';
 export { SessionTreeImpl } from './session';

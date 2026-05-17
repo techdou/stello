@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { NodeFileSystemAdapter } from '../../fs/file-system-adapter';
 import { SessionTreeImpl } from '../session-tree';
-import { MAIN_SESSION_ID } from '../../types/session';
 
 describe('SessionTreeImpl', () => {
   let tmpDir: string;
@@ -42,11 +41,6 @@ describe('SessionTreeImpl', () => {
     expect(await fs.exists(`sessions/${root.id}/memory.md`)).toBe(true);
     expect(await fs.exists(`sessions/${root.id}/scope.md`)).toBe(true);
     expect(await fs.exists(`sessions/${root.id}/index.md`)).toBe(true);
-  });
-
-  it('createRoot 返回固定的 MAIN_SESSION_ID 作为 id', async () => {
-    const root = await tree.createRoot('Any');
-    expect(root.id).toBe(MAIN_SESSION_ID);
   });
 
   it('createRoot 幂等：第二次调用返回现有节点，不覆写 label 与已写入的内容', async () => {
@@ -269,8 +263,8 @@ describe('SessionTreeImpl', () => {
     const node = await tree.getNode(childId);
     expect(node?.sourceSessionId).toBe(rootId);
 
-    const treeData = await tree.getTree();
-    expect(treeData.children[0]?.sourceSessionId).toBe(rootId);
+    const forest = await tree.getTree();
+    expect(forest[0]?.children[0]?.sourceSessionId).toBe(rootId);
   });
 
   // ─── getTree ───
@@ -281,7 +275,9 @@ describe('SessionTreeImpl', () => {
     const b = await tree.createChild({ parentId: root.id, label: 'B' });
     await tree.createChild({ parentId: a.id, label: 'A1', sourceSessionId: a.id });
 
-    const treeData = await tree.getTree();
+    const forest = await tree.getTree();
+    expect(forest).toHaveLength(1);
+    const treeData = forest[0]!;
     expect(treeData.id).toBe(root.id);
     expect(treeData.label).toBe('根');
     expect(treeData.status).toBe('active');
@@ -298,8 +294,9 @@ describe('SessionTreeImpl', () => {
     expect(childB?.children).toHaveLength(0);
   });
 
-  it('getTree 根不存在时抛错', async () => {
-    await expect(tree.getTree()).rejects.toThrow('根 Session 不存在');
+  it('getTree 在没有 root 时返回空数组', async () => {
+    const forest = await tree.getTree();
+    expect(forest).toEqual([]);
   });
 
   // ─── getAncestors（返回 TopologyNode[]） ───

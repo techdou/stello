@@ -1,5 +1,4 @@
 import type { SessionTree } from '../types/session';
-import { MAIN_SESSION_ID } from '../types/session';
 import type { MemoryEngine, TurnRecord } from '../types/memory';
 import type { LLMCompleteOptions } from '@stello-ai/session';
 import type {
@@ -358,12 +357,8 @@ export class StelloEngineImpl implements StelloEngine {
       throw new Error('Fork 不可用：当前 session runtime 未实现 fork()');
     }
 
-    // 从 main session fork 时不继承 main 的配置（invariant #6）：
-    // main 的 SerializableMainSessionConfig 与 regular 的 SerializableSessionConfig 共用
-    // 同一存储槽，需在读之前判断 source 角色、跳过读取。
-    const parentFrozen = sourceSessionId === MAIN_SESSION_ID
-      ? null
-      : await this.sessions.getConfig(sourceSessionId);
+    // 读取 source session 固化配置；不存在则使用空对象作为继承基线。
+    const parentFrozen = await this.sessions.getConfig(sourceSessionId);
     const parent: SessionConfig = parentFrozen ?? {};
 
     // 合成最终配置：defaults → parent → profile → forkOptions
@@ -391,7 +386,7 @@ export class StelloEngineImpl implements StelloEngine {
       });
 
     // Topology-first：创建拓扑节点，获取 ID（sourceSessionId 作为一等字段持久化）
-    const child = await this.sessions.createChild({
+    const child = await this.sessions.createSession({
       parentId: topologyParentId,
       label: options.label,
       sourceSessionId,

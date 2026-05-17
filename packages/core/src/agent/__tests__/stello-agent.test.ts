@@ -197,7 +197,7 @@ describe('StelloAgent', () => {
       fork: sessionFork,
     };
 
-    const createChild = vi.fn().mockResolvedValue({
+    const createSession = vi.fn().mockResolvedValue({
       id: 'child-2', parentId: 'child-1', children: [], refs: [], depth: 2, index: 0, label: 'UI 2',
     });
 
@@ -209,7 +209,7 @@ describe('StelloAgent', () => {
           return null;
         }),
         archive: vi.fn(),
-        createChild,
+        createSession,
         getConfig: vi.fn().mockResolvedValue(null),
         putConfig: vi.fn().mockResolvedValue(undefined),
       } as unknown as SessionTree,
@@ -249,7 +249,7 @@ describe('StelloAgent', () => {
     const result = await agent.forkSession('child-1', { label: 'UI 2' });
 
     // engine 用 `options.topologyParentId ?? this.session.id` 默认挂到 source（child-1）下
-    expect(createChild).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({
       label: 'UI 2',
       parentId: 'child-1',
     }));
@@ -462,23 +462,23 @@ describe('StelloAgent', () => {
   });
 
   describe('createMainSession', () => {
-    /** 构建带 createRoot/putConfig/getConfig 能力的 sessions mock */
+    /** 构建带 createSession/putConfig/getConfig 能力的 sessions mock */
     function sessionsMock() {
       const store = new Map<string, unknown>();
-      const createRoot = vi.fn().mockImplementation(async (label?: string) => ({
+      const createSession = vi.fn().mockImplementation(async (opts?: { label?: string }) => ({
         id: 'root',
         parentId: null,
         children: [],
         refs: [],
         depth: 0,
         index: 0,
-        label: label ?? 'Root',
+        label: opts?.label ?? 'Root',
       }));
       const putConfig = vi.fn().mockImplementation(async (id: string, config: unknown) => {
         store.set(id, config);
       });
       const getConfig = vi.fn().mockImplementation(async (id: string) => store.get(id) ?? null);
-      return { createRoot, putConfig, getConfig, store };
+      return { createSession, putConfig, getConfig, store };
     }
 
     it('createMainSession 返回根拓扑节点（指定 label）', async () => {
@@ -486,7 +486,7 @@ describe('StelloAgent', () => {
       const agent = createStelloAgent(
         baseConfig({
           sessions: {
-            createRoot: sessions.createRoot,
+            createSession: sessions.createSession,
             putConfig: sessions.putConfig,
             getConfig: sessions.getConfig,
           },
@@ -495,19 +495,19 @@ describe('StelloAgent', () => {
 
       const node = await agent.createMainSession({ label: 'Main' });
 
-      expect(sessions.createRoot).toHaveBeenCalledWith('Main');
+      expect(sessions.createSession).toHaveBeenCalledWith({ label: 'Main' });
       expect(node.id).toBe('root');
       expect(node.parentId).toBeNull();
       expect(node.depth).toBe(0);
       expect(node.label).toBe('Main');
     });
 
-    it('createMainSession 无 label 时走 createRoot 默认值', async () => {
+    it('createMainSession 无 label 时走 createSession 默认值', async () => {
       const sessions = sessionsMock();
       const agent = createStelloAgent(
         baseConfig({
           sessions: {
-            createRoot: sessions.createRoot,
+            createSession: sessions.createSession,
             putConfig: sessions.putConfig,
             getConfig: sessions.getConfig,
           },
@@ -516,7 +516,7 @@ describe('StelloAgent', () => {
 
       const node = await agent.createMainSession();
 
-      expect(sessions.createRoot).toHaveBeenCalledWith(undefined);
+      expect(sessions.createSession).toHaveBeenCalledWith({});
       expect(node.label).toBe('Root');
     });
 
@@ -525,7 +525,7 @@ describe('StelloAgent', () => {
       const agent = createStelloAgent({
         ...baseConfig({
           sessions: {
-            createRoot: sessions.createRoot,
+            createSession: sessions.createSession,
             putConfig: sessions.putConfig,
             getConfig: sessions.getConfig,
           },
@@ -555,7 +555,7 @@ describe('StelloAgent', () => {
       const agent = createStelloAgent({
         ...baseConfig({
           sessions: {
-            createRoot: sessions.createRoot,
+            createSession: sessions.createSession,
             putConfig: sessions.putConfig,
             getConfig: sessions.getConfig,
           },
@@ -580,7 +580,7 @@ describe('StelloAgent', () => {
       const agent = createStelloAgent(
         baseConfig({
           sessions: {
-            createRoot: sessions.createRoot,
+            createSession: sessions.createSession,
             putConfig: sessions.putConfig,
             getConfig: sessions.getConfig,
           },

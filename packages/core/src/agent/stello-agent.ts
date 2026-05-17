@@ -215,7 +215,9 @@ export class StelloAgent {
 
   /** 创建 main session（根节点），使用 mainSessionConfig 固化其配置 */
   async createMainSession(options?: { label?: string }): Promise<TopologyNode> {
-    const node = await this.sessions.createRoot(options?.label);
+    const createArgs: { label?: string } = {};
+    if (options?.label !== undefined) createArgs.label = options.label;
+    const node = await this.sessions.createSession(createArgs);
     const serialized = serializeMainSessionConfig(this.config.mainSessionConfig);
     await this.sessions.putConfig(node.id, serialized);
     return node;

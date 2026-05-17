@@ -142,7 +142,7 @@ describe('forkSession compress integration', () => {
       getTree: vi.fn(),
       getConfig: vi.fn().mockResolvedValue(null),
       putConfig: vi.fn().mockResolvedValue(undefined),
-      createChild: vi.fn().mockResolvedValue({
+      createSession: vi.fn().mockResolvedValue({
         id: 'child-1',
         parentId: 's1',
         children: [],
@@ -221,7 +221,7 @@ describe('forkSession compress integration', () => {
     await expect(
       engine.forkSession({ label: 'x', context: 'compress' }),
     ).rejects.toThrow(/compress/)
-    expect(fakeSessions.createChild).not.toHaveBeenCalled()
+    expect(fakeSessions.createSession).not.toHaveBeenCalled()
   })
 
   it('context=compress + 父 L3 空 → 不追加，但 forwardedContext=none', async () => {
