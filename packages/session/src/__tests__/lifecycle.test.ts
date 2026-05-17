@@ -10,12 +10,6 @@ describe('updateMeta() + archive() + fork()', () => {
       expect(session.meta.label).toBe('Updated')
     })
 
-    it('重命名 label', async () => {
-      const { session } = await makeSession()
-      await session.updateMeta({ label: 'Renamed' })
-      expect(session.meta.label).toBe('Renamed')
-    })
-
     it('持久化到 storage', async () => {
       const { session, storage } = await makeSession({ label: 'Old' })
       await session.updateMeta({ label: 'Persisted' })

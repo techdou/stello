@@ -14,6 +14,8 @@ describe('meta 同步访问', () => {
     expect(m.id).toBeTruthy()
     expect(m.createdAt).toBeTruthy()
     expect(m.updatedAt).toBeTruthy()
+    expect(m.label).toBeTruthy()
+    expect(m.status).toBe('active')
   })
 
   it('updateMeta 后 meta 同步更新', async () => {
