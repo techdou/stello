@@ -1,5 +1,33 @@
 # @stello-ai/core
 
+## 0.10.0
+
+### Breaking
+
+- 删除 `MAIN_SESSION_ID` 常量
+- 删除 `MainSessionConfig` / `SerializableMainSessionConfig` 类型
+- 删除 `MainSessionCompatible` / `SessionCompatibleIntegrateFn` 适配类型
+- 删除 `DEFAULT_INTEGRATE_PROMPT` 与 `createDefaultIntegrateFn`（外包给 orchestrator client）
+- `SessionTree` 接口收敛：删除 `createRoot` / `createChild` / `getRoot`；新增 `createSession({ parentId?, label?, sourceSessionId? })` 唯一入口、`listRoots()`；`getTree()` 改返回 `SessionTreeNode[]` 森林（多 root 合法）
+- `StelloAgent` 删除：`createMainSession()` / `integrate()` / `StelloAgentConfig.mainSessionConfig` / `StelloAgentSessionConfig.mainSessionLoader`
+- `StelloAgent` 新增：`createSession({ parentId?, label? })` 唯一会话创建入口
+- Engine 在 `forkSession` 中删除 `sourceSessionId === MAIN_SESSION_ID` 跳过分支——root 配置正常被子 fork 继承
+
+### Added — orchestrator-facing SDK
+
+- `StelloAgentConfig.storage?: SessionStorage`（顶层注入；data-IO SDK 依赖）
+- `StelloAgent.listSessions(filter?)` / `listRoots()` / `getTopology()` / `getTopologyNode(id)`
+- `StelloAgent.getSessionMetadata(id)` → `{ memory, insight }`
+- `StelloAgent.listSessionDigests(filter?)` → 取代旧 `getAllSessionL2s`
+- `StelloAgent.listMessages(id, opts?)`
+- `StelloAgent.putMemory(id, content)` / `putInsight(id, content)` / `clearInsight(id)`
+
+### Out of Scope
+
+- demo / devtools / visualizer 暂不修，CHANGELOG 标注 breaking
+- 旧 `'main'` 目录持久化数据不提供迁移工具
+- 批量原子写（`applyMetadataBatch`）与未来 context 槽位扩展留待下轮
+
 ## 0.9.0
 
 ### Changed
