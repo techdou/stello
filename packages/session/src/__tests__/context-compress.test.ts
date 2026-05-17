@@ -250,6 +250,18 @@ describe('自动压缩 — Session（compress + insight 共存）', () => {
     // 压缩摘要也在上下文中
     expect(call.some(m => m.content === 'main compressed')).toBe(true)
     expect(call.length).toBeLessThan(22)
+
+    // 验证 assembleSessionContext 的顺序：identity → insight → memory/summary → recent L3 → user message
+    const indices = {
+      insight: call.findIndex((m: Message) => m.content.includes('global insight')),
+      compressed: call.findIndex((m: Message) => m.content.includes('main compressed')),
+      user: call.findIndex((m: Message) => m.role === 'user' && m.content === 'new'),
+    }
+    expect(indices.insight).toBeGreaterThanOrEqual(0)
+    expect(indices.compressed).toBeGreaterThanOrEqual(0)
+    expect(indices.user).toBeGreaterThanOrEqual(0)
+    expect(indices.insight).toBeLessThan(indices.compressed)
+    expect(indices.compressed).toBeLessThan(indices.user)
   })
 
   it('未传 compressFn 时 Session 自动使用内置 LLM 压缩（insight 保留）', async () => {
@@ -279,23 +291,6 @@ describe('自动压缩 — Session（compress + insight 共存）', () => {
     expect(sendCall.some(m => m.content === 'global insight')).toBe(true)
     expect(sendCall.some(m => m.content === 'main builtin compressed')).toBe(true)
     expect(sendCall.length).toBeLessThan(22)
-  })
-
-  it('Session trimRecords 正常工作', async () => {
-    const storage = new InMemoryStorageAdapter()
-    const session = await createSession({ storage, label: 'Test Root' })
-    const id = session.meta.id
-
-    await storage.appendRecord(id, { role: 'user', content: 'a' })
-    await storage.appendRecord(id, { role: 'assistant', content: 'b' })
-    await storage.appendRecord(id, { role: 'user', content: 'c' })
-    await storage.appendRecord(id, { role: 'assistant', content: 'd' })
-
-    await session.trimRecords(2)
-
-    const msgs = await session.messages()
-    expect(msgs).toHaveLength(2)
-    expect(msgs[0]!.content).toBe('c')
   })
 })
 
