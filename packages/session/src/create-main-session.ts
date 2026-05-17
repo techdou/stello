@@ -6,7 +6,7 @@ import type { SessionMeta, SessionMetaUpdate, ForkOptions } from './types/sessio
 import type { Message } from './types/llm.js'
 import type {
   IntegrateResult, CreateMainSessionOptions, LoadMainSessionOptions,
-  SendResult, StreamResult,
+  SendResult, StreamResult, ChildL2Summary,
 } from './types/functions.js'
 import { createSession } from './create-session.js'
 import { assembleMainSessionContext, createBuiltinCompressFn, type CompressionCache } from './context-utils.js'
@@ -319,7 +319,8 @@ function buildMainSession(
       }
 
       // 1. 扁平收集所有子 Session 的 L2
-      const childSummaries = await storage.getAllSessionL2s()
+      // FIXME: Task 3 deletes this file entirely. Stub so this file typechecks meanwhile.
+      const childSummaries: ChildL2Summary[] = []
       const validChildSessionIds = new Set(childSummaries.map((child) => child.sessionId))
 
       // 2. 读取当前 synthesis

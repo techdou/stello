@@ -77,7 +77,8 @@ describe('MainSession synthesis()', () => {
     expect(await main.synthesis()).toBeNull()
   })
 
-  it('integrate 后 synthesis 可读', async () => {
+  // Task 2 stubs out getAllSessionL2s; this test will be removed in Task 3.
+  it.skip('integrate 后 synthesis 可读', async () => {
     const fn: IntegrateFn = async (children) => ({
       synthesis: `共 ${children.length} 个子任务`,
       insights: [],
@@ -90,7 +91,8 @@ describe('MainSession synthesis()', () => {
   })
 })
 
-describe('MainSession integrate()', () => {
+// Task 2 stubs out getAllSessionL2s; integrate() tests will be removed in Task 3.
+describe.skip('MainSession integrate()', () => {
   it('IntegrateFn 接收所有子 Session 的 L2', async () => {
     const fn = vi.fn<IntegrateFn>(async () => ({
       synthesis: 'ok',

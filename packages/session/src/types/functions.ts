@@ -1,5 +1,5 @@
 import type { Message, LLMAdapter, ToolCall, LLMCompleteOptions } from './llm.js'
-import type { SessionStorage, MainStorage } from './storage.js'
+import type { SessionStorage } from './storage.js'
 
 /** consolidate 函数签名：L3 → L2，接收当前 L2 和 L3 记录，返回新 L2 */
 export type ConsolidateFn = (currentMemory: string | null, messages: Message[]) => Promise<string>
@@ -68,8 +68,8 @@ export interface LoadSessionOptions {
 
 /** createMainSession() 的选项 */
 export interface CreateMainSessionOptions {
-  /** 指定存储适配器（Main Session 需要 MainStorage） */
-  storage: MainStorage
+  /** 指定存储适配器 */
+  storage: SessionStorage
   /** 指定 LLM 适配器 */
   llm?: LLMAdapter
   /** Main Session 标签 */
@@ -87,8 +87,8 @@ export interface CreateMainSessionOptions {
 
 /** loadMainSession() 的选项 */
 export interface LoadMainSessionOptions {
-  /** 指定存储适配器（Main Session 需要 MainStorage） */
-  storage: MainStorage
+  /** 指定存储适配器 */
+  storage: SessionStorage
   /** LLM 适配器 */
   llm?: LLMAdapter
   /** 系统提示词 */
