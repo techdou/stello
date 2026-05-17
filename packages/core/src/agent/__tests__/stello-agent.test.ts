@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { SessionStorage } from '@stello-ai/session';
 import type { SessionTree } from '../../types/session';
 import type { MemoryEngine } from '../../types/memory';
 import type { ConfirmProtocol, SkillRouter } from '../../types/lifecycle';
@@ -533,6 +534,68 @@ describe('StelloAgent', () => {
       );
       const node = await agent.getTopologyNode('x');
       expect(node?.id).toBe('x');
+    });
+  });
+
+  describe('orchestrator-facing data-IO SDK', () => {
+    function storageMock() {
+      return {
+        getMemory: vi.fn().mockResolvedValue('mem-x'),
+        putMemory: vi.fn().mockResolvedValue(undefined),
+        getInsight: vi.fn().mockResolvedValue('ins-x'),
+        putInsight: vi.fn().mockResolvedValue(undefined),
+        clearInsight: vi.fn().mockResolvedValue(undefined),
+        listRecords: vi.fn().mockResolvedValue([{ role: 'user', content: 'hi' }]),
+      } as unknown as SessionStorage;
+    }
+
+    it('未注入 storage 时数据 IO 抛错', async () => {
+      const agent = createStelloAgent(baseConfig());
+      await expect(agent.getSessionMetadata('x')).rejects.toThrow(
+        'StelloAgent.getSessionMetadata 需要 StelloAgentConfig.storage',
+      );
+    });
+
+    it('getSessionMetadata 聚合 memory + insight', async () => {
+      const storage = storageMock();
+      const agent = createStelloAgent({ ...baseConfig(), storage });
+      expect(await agent.getSessionMetadata('s1')).toEqual({ memory: 'mem-x', insight: 'ins-x' });
+    });
+
+    it('listSessionDigests 走 sessions.listAll 并对每个 Session 取 memory/insight', async () => {
+      const storage = storageMock();
+      const listAll = vi.fn().mockResolvedValue([
+        { id: 'a', label: 'A', status: 'active', turnCount: 0, createdAt: '', updatedAt: '', lastActiveAt: '' },
+        { id: 'b', label: 'B', status: 'archived', turnCount: 0, createdAt: '', updatedAt: '', lastActiveAt: '' },
+      ]);
+      const agent = createStelloAgent({
+        ...baseConfig({ sessions: { listAll } as unknown as SessionTree }),
+        storage,
+      });
+      const digests = await agent.listSessionDigests({ status: 'active' });
+      expect(digests).toEqual([
+        { id: 'a', label: 'A', status: 'active', memory: 'mem-x', insight: 'ins-x' },
+      ]);
+    });
+
+    it('listMessages 代理 storage.listRecords', async () => {
+      const storage = storageMock();
+      const agent = createStelloAgent({ ...baseConfig(), storage });
+      expect(await agent.listMessages('s1', { limit: 10 })).toEqual([
+        { role: 'user', content: 'hi' },
+      ]);
+      expect(storage.listRecords).toHaveBeenCalledWith('s1', { limit: 10 });
+    });
+
+    it('putMemory / putInsight / clearInsight 代理 storage', async () => {
+      const storage = storageMock();
+      const agent = createStelloAgent({ ...baseConfig(), storage });
+      await agent.putMemory('s1', 'M');
+      await agent.putInsight('s1', 'I');
+      await agent.clearInsight('s1');
+      expect(storage.putMemory).toHaveBeenCalledWith('s1', 'M');
+      expect(storage.putInsight).toHaveBeenCalledWith('s1', 'I');
+      expect(storage.clearInsight).toHaveBeenCalledWith('s1');
     });
   });
 });

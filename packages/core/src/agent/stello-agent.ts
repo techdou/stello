@@ -31,6 +31,9 @@ import type {
   SerializableSessionConfig,
   SessionConfig,
 } from '../types/session-config';
+import type {
+  SessionStorage, ListRecordsOptions, Message,
+} from '@stello-ai/session';
 
 /** Session 能力相关配置 */
 export interface StelloAgentCapabilitiesConfig {
@@ -89,12 +92,34 @@ export interface StelloAgentOrchestrationConfig {
 export interface StelloAgentConfig {
   sessions: SessionTree;
   memory: MemoryEngine;
+  /**
+   * Session 数据存储（L3 / system prompt / insight / memory）。
+   *
+   * 用于 orchestrator-facing SDK（getSessionMetadata / listMessages / putMemory / ...）。
+   * 应用层应保证 sessions（拓扑）与 storage（内容）指向同一份持久化后端。
+   */
+  storage?: SessionStorage;
   /** Regular session 的 agent 级默认配置，fork 合成链的最低优先级 */
   sessionDefaults?: SessionConfig;
   session?: StelloAgentSessionConfig;
   capabilities: StelloAgentCapabilitiesConfig;
   runtime?: StelloAgentRuntimeConfig;
   orchestration?: StelloAgentOrchestrationConfig;
+}
+
+/** 单 Session 的外部数据视图（memory + insight 聚合） */
+export interface SessionMetadataView {
+  memory: string | null;
+  insight: string | null;
+}
+
+/** Session digest：批量视图条目（取代旧 getAllSessionL2s） */
+export interface SessionDigest {
+  id: string;
+  label: string;
+  status: 'active' | 'archived';
+  memory: string | null;
+  insight: string | null;
 }
 
 
@@ -155,6 +180,9 @@ export class StelloAgent {
   /** 暴露 MemoryEngine，方便调用方做数据读写 */
   readonly memory: StelloAgentConfig['memory'];
 
+  /** 注入的数据存储；data-IO SDK 方法依赖该字段 */
+  readonly storage?: SessionStorage;
+
   /** 暴露 ForkProfileRegistry，供 tool 在运行时校验 profile 名称 */
   get profiles(): ForkProfileRegistry | undefined {
     return this.config.capabilities.profiles;
@@ -167,6 +195,7 @@ export class StelloAgent {
     this.config = config;
     this.sessions = config.sessions;
     this.memory = config.memory;
+    this.storage = config.storage;
     const engineFactory = new DefaultEngineFactory({
       sessions: config.sessions,
       memory: config.memory,
@@ -235,6 +264,71 @@ export class StelloAgent {
   /** 获取单个拓扑节点 */
   getTopologyNode(id: string): Promise<TopologyNode | null> {
     return this.sessions.getNode(id);
+  }
+
+  /** 读取单个 Session 的 memory / insight 视图 */
+  async getSessionMetadata(id: string): Promise<SessionMetadataView> {
+    const storage = this.requireStorage('getSessionMetadata');
+    const [memory, insight] = await Promise.all([
+      storage.getMemory(id),
+      storage.getInsight(id),
+    ]);
+    return { memory, insight };
+  }
+
+  /**
+   * 列出所有 Session 的 digest（id / label / status / memory / insight）。
+   *
+   * 取代旧 `MainStorage.getAllSessionL2s()`：调用方自行根据 memory 字段做 reflection。
+   */
+  async listSessionDigests(filter?: { status?: 'active' | 'archived' }): Promise<SessionDigest[]> {
+    const storage = this.requireStorage('listSessionDigests');
+    const metas = await this.sessions.listAll();
+    const filtered = filter?.status
+      ? metas.filter((m) => m.status === filter.status)
+      : metas;
+    return Promise.all(
+      filtered.map(async (m) => {
+        const [memory, insight] = await Promise.all([
+          storage.getMemory(m.id),
+          storage.getInsight(m.id),
+        ]);
+        return { id: m.id, label: m.label, status: m.status, memory, insight };
+      }),
+    );
+  }
+
+  /** 读取指定 Session 的 L3 消息 */
+  listMessages(id: string, options?: ListRecordsOptions): Promise<Message[]> {
+    const storage = this.requireStorage('listMessages');
+    return storage.listRecords(id, options);
+  }
+
+  /** 写入指定 Session 的 memory（持久；每次 send 注入） */
+  putMemory(id: string, content: string): Promise<void> {
+    const storage = this.requireStorage('putMemory');
+    return storage.putMemory(id, content);
+  }
+
+  /** 写入指定 Session 的 insight（一次性；被 send 消费后清除） */
+  putInsight(id: string, content: string): Promise<void> {
+    const storage = this.requireStorage('putInsight');
+    return storage.putInsight(id, content);
+  }
+
+  /** 清除指定 Session 的 insight */
+  clearInsight(id: string): Promise<void> {
+    const storage = this.requireStorage('clearInsight');
+    return storage.clearInsight(id);
+  }
+
+  private requireStorage(method: string): SessionStorage {
+    if (!this.storage) {
+      throw new Error(
+        `StelloAgent.${method} 需要 StelloAgentConfig.storage；请在创建 agent 时注入 SessionStorage`,
+      );
+    }
+    return this.storage;
   }
 
   /** 进入指定 session 的整轮对话 */

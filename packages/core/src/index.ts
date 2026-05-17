@@ -121,6 +121,8 @@ export type {
   StelloAgentCapabilitiesConfig,
   StelloAgentRuntimeConfig,
   StelloAgentOrchestrationConfig,
+  SessionMetadataView,
+  SessionDigest,
 } from './agent/stello-agent';
 
 // 内置 tool 工厂（builtin-tools redesign）
