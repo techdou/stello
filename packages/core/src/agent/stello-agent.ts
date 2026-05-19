@@ -298,6 +298,18 @@ export class StelloAgent {
     );
   }
 
+  /** 读取单个 Session 的 digest（id / label / status / memory / insight）。返回 null 表示不存在。 */
+  async getSessionDigest(id: string): Promise<SessionDigest | null> {
+    const meta = await this.sessions.get(id);
+    if (!meta) return null;
+    const storage = this.requireStorage('getSessionDigest');
+    const [memory, insight] = await Promise.all([
+      storage.getMemory(id),
+      storage.getInsight(id),
+    ]);
+    return { id: meta.id, label: meta.label, status: meta.status, memory, insight };
+  }
+
   /** 读取指定 Session 的 L3 消息 */
   listMessages(id: string, options?: ListRecordsOptions): Promise<Message[]> {
     const storage = this.requireStorage('listMessages');
