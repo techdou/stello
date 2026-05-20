@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 import { applyCompressContext, ForkConfigError } from '../fork-compress'
-import type { LLMCallFn } from '../../llm/defaults'
 import { StelloEngineImpl } from '../stello-engine'
 import { ForkProfileRegistryImpl, type ForkProfile } from '../fork-profile'
 import type { SessionTree } from '../../types/session'
@@ -18,6 +17,7 @@ describe('applyCompressContext', () => {
     const result = await applyCompressContext({
       context: 'inherit',
       systemPrompt: 'role',
+      forkCompressFn: undefined,
       compressFn: undefined,
       llmCallFn: undefined,
       sourceMessages: async () => makeMessages(2),
@@ -30,6 +30,7 @@ describe('applyCompressContext', () => {
     const result = await applyCompressContext({
       context: 'compress',
       systemPrompt: 'role',
+      forkCompressFn: undefined,
       compressFn,
       llmCallFn: undefined,
       sourceMessages: async () => makeMessages(4),
@@ -44,6 +45,7 @@ describe('applyCompressContext', () => {
     const result = await applyCompressContext({
       context: 'compress',
       systemPrompt: 'role',
+      forkCompressFn: undefined,
       compressFn,
       llmCallFn: undefined,
       sourceMessages: async () => [],
@@ -57,6 +59,7 @@ describe('applyCompressContext', () => {
     const result = await applyCompressContext({
       context: 'compress',
       systemPrompt: undefined,
+      forkCompressFn: undefined,
       compressFn: async () => 'X',
       llmCallFn: undefined,
       sourceMessages: async () => makeMessages(2),
@@ -65,38 +68,13 @@ describe('applyCompressContext', () => {
     expect(result.forwardedContext).toBe('none')
   })
 
-  it('compress + 无 compressFn 但有 llmCallFn：fallback 用 DEFAULT_COMPRESS_PROMPT 构建', async () => {
-    const llmCallFn = vi.fn<LLMCallFn>(async () => 'fallback-summary')
-    const result = await applyCompressContext({
-      context: 'compress',
-      systemPrompt: 'r',
-      compressFn: undefined,
-      llmCallFn,
-      sourceMessages: async () => makeMessages(2),
-    })
-    expect(llmCallFn).toHaveBeenCalledOnce()
-    expect(result.systemPrompt).toBe('r\n\n<parent_context>\nfallback-summary\n</parent_context>')
-    expect(result.forwardedContext).toBe('none')
-  })
-
-  it('compress + 无 compressFn 也无 llmCallFn：抛 ForkConfigError', async () => {
-    await expect(
-      applyCompressContext({
-        context: 'compress',
-        systemPrompt: 'r',
-        compressFn: undefined,
-        llmCallFn: undefined,
-        sourceMessages: async () => makeMessages(2),
-      }),
-    ).rejects.toBeInstanceOf(ForkConfigError)
-  })
-
   it('compress + compressFn 抛异常：向上传播', async () => {
     const boom = new Error('LLM down')
     await expect(
       applyCompressContext({
         context: 'compress',
         systemPrompt: 'r',
+        forkCompressFn: undefined,
         compressFn: async () => {
           throw boom
         },
@@ -104,6 +82,69 @@ describe('applyCompressContext', () => {
         sourceMessages: async () => makeMessages(2),
       }),
     ).rejects.toBe(boom)
+  })
+
+  it('compress + 同时提供 forkCompressFn 与 compressFn：优先 forkCompressFn', async () => {
+    const forkFn = vi.fn(async () => 'fork-summary')
+    const compressFn = vi.fn(async () => 'normal-summary')
+    const result = await applyCompressContext({
+      context: 'compress',
+      systemPrompt: 'role',
+      forkCompressFn: forkFn,
+      compressFn,
+      llmCallFn: undefined,
+      sourceMessages: async () => makeMessages(2),
+    })
+    expect(forkFn).toHaveBeenCalledOnce()
+    expect(compressFn).not.toHaveBeenCalled()
+    expect(result.systemPrompt).toBe('role\n\n<parent_context>\nfork-summary\n</parent_context>')
+    expect(result.forwardedContext).toBe('none')
+  })
+
+  it('compress + forkCompressFn 缺失但 compressFn 存在：回退到 compressFn', async () => {
+    const compressFn = vi.fn(async () => 'normal-summary')
+    const result = await applyCompressContext({
+      context: 'compress',
+      systemPrompt: 'role',
+      forkCompressFn: undefined,
+      compressFn,
+      llmCallFn: undefined,
+      sourceMessages: async () => makeMessages(2),
+    })
+    expect(compressFn).toHaveBeenCalledOnce()
+    expect(result.systemPrompt).toBe('role\n\n<parent_context>\nnormal-summary\n</parent_context>')
+  })
+
+  it('compress + 两者均缺失但 llmCallFn 存在：用 DEFAULT_FORK_COMPRESS_PROMPT 构造默认', async () => {
+    const llmCallFn = vi.fn(async (msgs: Array<{ role: string; content: string }>) => {
+      // 断言 system 消息包含新默认 prompt 的关键字
+      const sysMsg = msgs.find((m) => m.role === 'system')
+      expect(sysMsg?.content).toContain('子会话开场')
+      return 'default-summary'
+    })
+    const result = await applyCompressContext({
+      context: 'compress',
+      systemPrompt: 'r',
+      forkCompressFn: undefined,
+      compressFn: undefined,
+      llmCallFn,
+      sourceMessages: async () => makeMessages(2),
+    })
+    expect(llmCallFn).toHaveBeenCalledOnce()
+    expect(result.systemPrompt).toBe('r\n\n<parent_context>\ndefault-summary\n</parent_context>')
+  })
+
+  it('compress + 三者均缺失：仍抛 ForkConfigError', async () => {
+    await expect(
+      applyCompressContext({
+        context: 'compress',
+        systemPrompt: 'r',
+        forkCompressFn: undefined,
+        compressFn: undefined,
+        llmCallFn: undefined,
+        sourceMessages: async () => makeMessages(2),
+      }),
+    ).rejects.toBeInstanceOf(ForkConfigError)
   })
 })
 

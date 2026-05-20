@@ -4,7 +4,7 @@ import type {
 } from '../adapters/session-runtime'
 import {
   createDefaultCompressFn,
-  DEFAULT_COMPRESS_PROMPT,
+  DEFAULT_FORK_COMPRESS_PROMPT,
   type LLMCallFn,
 } from '../llm/defaults'
 
@@ -21,7 +21,9 @@ export interface ApplyCompressContextArgs {
   context: SessionCompatibleForkOptions['context']
   /** compose 链拼好的 systemPrompt（未追加 parent_context） */
   systemPrompt: string | undefined
-  /** 显式传入的 compressFn（优先级高于 llmCallFn fallback） */
+  /** 显式 fork-compress 函数（优先级最高） */
+  forkCompressFn: SessionCompatibleCompressFn | undefined
+  /** 普通 compress 函数（forkCompressFn 缺失时的回退） */
   compressFn: SessionCompatibleCompressFn | undefined
   /** 已经从 LLMAdapter 包装好的 LLMCallFn；用于 fallback 构造默认 compressFn */
   llmCallFn: LLMCallFn | undefined
@@ -55,21 +57,22 @@ export interface ApplyCompressContextResult {
 export async function applyCompressContext(
   args: ApplyCompressContextArgs,
 ): Promise<ApplyCompressContextResult> {
-  const { context, systemPrompt, compressFn, llmCallFn, sourceMessages } = args
+  const { context, systemPrompt, forkCompressFn, compressFn, llmCallFn, sourceMessages } = args
 
   if (context !== 'compress') {
     return { systemPrompt, forwardedContext: context }
   }
 
   const resolvedCompressFn: SessionCompatibleCompressFn | undefined =
+    forkCompressFn ??
     compressFn ??
     (llmCallFn
-      ? createDefaultCompressFn(DEFAULT_COMPRESS_PROMPT, llmCallFn)
+      ? createDefaultCompressFn(DEFAULT_FORK_COMPRESS_PROMPT, llmCallFn)
       : undefined)
 
   if (!resolvedCompressFn) {
     throw new ForkConfigError(
-      'compress context requires compressFn or llm in compose chain',
+      'compress context requires forkCompressFn, compressFn, or llm in compose chain',
     )
   }
 

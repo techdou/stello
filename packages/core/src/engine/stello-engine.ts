@@ -377,6 +377,7 @@ export class StelloEngineImpl implements StelloEngine {
       await applyCompressContext({
         context: effectiveContext,
         systemPrompt: merged.systemPrompt,
+        forkCompressFn: merged.forkCompressFn,
         compressFn: merged.compressFn,
         llmCallFn,
         sourceMessages: () => this.session.messages(),
