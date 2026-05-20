@@ -140,6 +140,7 @@ export {
   createDefaultCompressFn,
   DEFAULT_CONSOLIDATE_PROMPT,
   DEFAULT_COMPRESS_PROMPT,
+  DEFAULT_FORK_COMPRESS_PROMPT,
 } from './llm/defaults';
 export type { LLMCallFn, DefaultFnOptions } from './llm/defaults';
 

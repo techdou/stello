@@ -25,6 +25,8 @@ export interface SessionConfig {
   consolidateFn?: SessionCompatibleConsolidateFn;
   /** 上下文压缩函数 */
   compressFn?: SessionCompatibleCompressFn;
+  /** Fork 时用于压缩父对话作为子会话上下文背景的函数;缺省时降级到 compressFn,再缺省则用 DEFAULT_FORK_COMPRESS_PROMPT */
+  forkCompressFn?: SessionCompatibleCompressFn;
 }
 
 /**
