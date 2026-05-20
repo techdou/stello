@@ -10,13 +10,6 @@ export type {
   SessionTreeNode,
   CreateSessionOptions,
   SessionTree,
-  // 记忆系统
-  InheritancePolicy,
-  CoreSchemaField,
-  CoreSchema,
-  TurnRecord,
-  AssembledContext,
-  MemoryEngine,
   // 文件系统适配器
   FileSystemAdapter,
   // 生命周期钩子
@@ -46,11 +39,13 @@ export type {
 } from './types';
 
 export type { ToolExecutionContext } from './types/tool';
+// Re-export internal types that appear in public interfaces (BootstrapResult,
+// StelloEngine) so consumers can type their lifecycle implementations.
+export type { TurnRecord, AssembledContext } from './types/memory';
 
 // 导出实现
 export { NodeFileSystemAdapter } from './fs';
 export { SessionTreeImpl } from './session';
-export { FileSystemMemoryEngine } from './memory/file-system-memory-engine';
 export { SplitGuard } from './session/split-guard';
 export type { SplitCheckResult } from './session/split-guard';
 export { SkillRouterImpl } from './skill/skill-router';
@@ -125,8 +120,19 @@ export type {
   SessionDigest,
 } from './agent/stello-agent';
 
+// 共享 memory
+export { InMemorySharedMemoryStore } from './shared-memory/in-memory-shared-memory-store';
+export { renderSharedMemoryIndex } from './shared-memory/render-index';
+export type { SharedMemoryEntry, SharedMemoryStore } from './shared-memory/types';
+
 // 内置 tool 工厂（builtin-tools redesign）
-export { createSessionTool, activateSkillTool } from './builtin-tools';
+export {
+  createSessionTool,
+  activateSkillTool,
+  memoryRecallTool,
+  memoryRememberTool,
+  memoryForgetTool,
+} from './builtin-tools';
 
 // 导出 LLM 默认实现
 export {
