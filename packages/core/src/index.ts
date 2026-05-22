@@ -122,16 +122,14 @@ export type {
 
 // 共享 memory
 export { InMemorySharedMemoryStore } from './shared-memory/in-memory-shared-memory-store';
-export { renderSharedMemoryIndex } from './shared-memory/render-index';
+export { renderSharedMemoryContext } from './shared-memory/render-shared-memory';
 export type { SharedMemoryEntry, SharedMemoryStore } from './shared-memory/types';
 
-// 内置 tool 工厂（builtin-tools redesign）
+// 内置 tool 工厂
 export {
   createSessionTool,
   activateSkillTool,
-  memoryRecallTool,
-  memoryRememberTool,
-  memoryForgetTool,
+  memoryEditTool,
 } from './builtin-tools';
 
 // 导出 LLM 默认实现
