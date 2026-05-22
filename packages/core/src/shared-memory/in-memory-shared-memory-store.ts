@@ -7,7 +7,7 @@ import type { SharedMemoryEntry, SharedMemoryStore } from './types'
  * 避免并发 upsert / remove 时读到中间状态。读操作不加锁，允许脏读。
  */
 export class InMemorySharedMemoryStore implements SharedMemoryStore {
-  private readonly entries = new Map<string, { summary: string; body: string }>()
+  private readonly entries = new Map<string, string>()
   private writeLock: Promise<unknown> = Promise.resolve()
 
   /** 把 fn 排入写队列，串行执行 */
@@ -19,19 +19,19 @@ export class InMemorySharedMemoryStore implements SharedMemoryStore {
 
   /** 列举全部 entries，按 Map 插入顺序 */
   async list(): Promise<SharedMemoryEntry[]> {
-    return [...this.entries].map(([slug, { summary, body }]) => ({ slug, summary, body }))
+    return [...this.entries].map(([slug, body]) => ({ slug, body }))
   }
 
   /** 读取单条 entry */
   async get(slug: string): Promise<SharedMemoryEntry | null> {
     const v = this.entries.get(slug)
-    return v ? { slug, summary: v.summary, body: v.body } : null
+    return v !== undefined ? { slug, body: v } : null
   }
 
   /** 写入或覆盖；JS Map.set 在已有 key 上不改变插入位置 */
-  upsert(slug: string, summary: string, body: string): Promise<void> {
+  upsert(slug: string, body: string): Promise<void> {
     return this.withWriteLock(async () => {
-      this.entries.set(slug, { summary, body })
+      this.entries.set(slug, body)
     })
   }
 
