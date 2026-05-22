@@ -10,12 +10,13 @@ function makeLLM(): { adapter: LLMAdapter; lastMessages: () => Message[] } {
       captured = messages
       return { content: 'ok' }
     },
+    maxContextTokens: 1_000_000,
   }
   return { adapter, lastMessages: () => captured }
 }
 
-describe('shared memory index injection', () => {
-  it('inserts shared memory index between systemPrompt and session_identity', async () => {
+describe('shared memory context injection', () => {
+  it('inserts shared memory context between systemPrompt and session_identity', async () => {
     const storage = new InMemoryStorageAdapter()
     const { adapter, lastMessages } = makeLLM()
     const session = await createSession({
@@ -25,11 +26,13 @@ describe('shared memory index injection', () => {
       llm: adapter,
     })
     await session.setSystemPrompt('SYS')
-    await session.send('hello', { sharedMemoryIndex: '<shared_memory_index>\n- a: x\n</shared_memory_index>' })
+    await session.send('hello', {
+      sharedMemoryContext: '<shared_memory>\n## a\nbody-a\n</shared_memory>',
+    })
 
     const msgs = lastMessages()
     const sysIdx = msgs.findIndex(m => m.role === 'system' && m.content === 'SYS')
-    const memIdx = msgs.findIndex(m => m.role === 'system' && m.content.includes('<shared_memory_index>'))
+    const memIdx = msgs.findIndex(m => m.role === 'system' && m.content.includes('<shared_memory>'))
     const idIdx  = msgs.findIndex(m => m.role === 'system' && m.content.includes('<session_identity>'))
 
     expect(sysIdx).toBeGreaterThanOrEqual(0)
@@ -37,7 +40,7 @@ describe('shared memory index injection', () => {
     expect(idIdx).toBeGreaterThan(memIdx)
   })
 
-  it('omits the slot when sharedMemoryIndex is undefined', async () => {
+  it('omits the slot when sharedMemoryContext is undefined', async () => {
     const storage = new InMemoryStorageAdapter()
     const { adapter, lastMessages } = makeLLM()
     const session = await createSession({
@@ -47,13 +50,13 @@ describe('shared memory index injection', () => {
       llm: adapter,
     })
     await session.setSystemPrompt('SYS')
-    await session.send('hello') // no options
+    await session.send('hello')
 
     const msgs = lastMessages()
-    expect(msgs.find(m => m.content.includes('<shared_memory_index>'))).toBeUndefined()
+    expect(msgs.find(m => m.content.includes('<shared_memory>'))).toBeUndefined()
   })
 
-  it('omits the slot when sharedMemoryIndex is empty string', async () => {
+  it('omits the slot when sharedMemoryContext is empty string', async () => {
     const storage = new InMemoryStorageAdapter()
     const { adapter, lastMessages } = makeLLM()
     const session = await createSession({
@@ -62,9 +65,9 @@ describe('shared memory index injection', () => {
       storage,
       llm: adapter,
     })
-    await session.send('hi', { sharedMemoryIndex: '' })
+    await session.send('hi', { sharedMemoryContext: '' })
 
     const msgs = lastMessages()
-    expect(msgs.find(m => m.content.includes('<shared_memory_index>'))).toBeUndefined()
+    expect(msgs.find(m => m.content.includes('<shared_memory>'))).toBeUndefined()
   })
 })
