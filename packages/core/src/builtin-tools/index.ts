@@ -1,5 +1,3 @@
 export { createSessionTool } from './create-session-tool'
 export { activateSkillTool } from './activate-skill-tool'
-export { memoryRecallTool } from './memory-recall-tool'
-export { memoryRememberTool } from './memory-remember-tool'
-export { memoryForgetTool } from './memory-forget-tool'
+export { memoryEditTool } from './memory-edit-tool'
