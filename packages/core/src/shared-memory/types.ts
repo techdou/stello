@@ -1,10 +1,9 @@
 /**
  * 共享 memory 的单条记录。
- * slug: 主键 / summary: 出现在索引行的一句话 / body: recall 时返回的全文。
+ * slug: 主键 / body: 完整内容,渲染到 system prompt 的 <shared_memory> 段。
  */
 export interface SharedMemoryEntry {
   slug: string
-  summary: string
   body: string
 }
 
@@ -20,8 +19,8 @@ export interface SharedMemoryStore {
   list(): Promise<SharedMemoryEntry[]>
   /** 读取单条 entry，不存在返回 null */
   get(slug: string): Promise<SharedMemoryEntry | null>
-  /** 写入或覆盖一条 entry（不存在则追加到末尾，存在则覆盖 summary + body 并保持顺序） */
-  upsert(slug: string, summary: string, body: string): Promise<void>
+  /** 写入或覆盖一条 entry（不存在则追加到末尾，存在则覆盖 body 并保持顺序） */
+  upsert(slug: string, body: string): Promise<void>
   /** 删除一条 entry；不存在为 no-op */
   remove(slug: string): Promise<void>
 }
