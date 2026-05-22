@@ -34,7 +34,7 @@ import type {
   SessionStorage, ListRecordsOptions, Message,
 } from '@stello-ai/session';
 import type { SharedMemoryEntry, SharedMemoryStore } from '../shared-memory/types';
-import { renderSharedMemoryIndex } from '../shared-memory/render-index';
+import { renderSharedMemoryContext } from '../shared-memory/render-shared-memory';
 
 /** Session 能力相关配置 */
 export interface StelloAgentCapabilitiesConfig {
@@ -100,15 +100,18 @@ export interface StelloAgentConfig {
    */
   storage?: SessionStorage;
   /**
-   * Agent 级共享 memory 存储。
+   * Agent 级共享 memory 存储。注入后:
+   * - SDK 方法 (listSharedMemory / getSharedMemoryEntry / upsertSharedMemoryEntry /
+   *   removeSharedMemoryEntry) 可用
+   * - 内置 tool `stello_memory_edit` 可用
+   * - 当 agent 走默认 session.sessionLoader 路径时,<shared_memory> 全量段每次
+   *   send 前由内置 adapter 自动渲染并注入到上下文。
    *
-   * 注入后：四个 SDK 方法可用；当 agent 走默认 `session.sessionLoader` 路径时，
-   * 索引段每次 send 前由内置 adapter 自动渲染并注入到上下文。
+   * 未注入：SDK 方法和内置 tool 抛 "sharedMemory not configured";<shared_memory>
+   * 段不进入上下文。
    *
-   * 未注入：四个 SDK 方法和三个内置 tool 抛 "sharedMemory not configured"，索引段不进入上下文。
-   *
-   * 注意：如果调用方提供自定义 `runtime.resolver` 而非 `session.sessionLoader`，
-   * 自动注入不会发生 —— 调用方需要自行把 `renderSharedMemoryIndex(agent.sharedMemory)`
+   * 注意：如果调用方提供自定义 runtime.resolver 而非 session.sessionLoader,
+   * 自动注入不会发生 —— 调用方需要自行把 renderSharedMemoryContext(agent.sharedMemory)
    * 接入到自己构造的 EngineRuntimeSession 的 send/stream 调用上。
    */
   sharedMemory?: SharedMemoryStore;
@@ -146,7 +149,7 @@ function resolveRuntimeResolver(config: StelloAgentConfig, agent: StelloAgent): 
       // TODO(unified-session-config): 接入 fork 合成链后，compressFn 应来自合成配置而非 sessionDefaults
       compressFn: config.sessionDefaults?.compressFn,
       serializeResult: config.session!.serializeSendResult ?? serializeSessionSendResult,
-      sharedMemoryIndexProvider: () => renderSharedMemoryIndex(agent.sharedMemory),
+      sharedMemoryContextProvider: () => renderSharedMemoryContext(agent.sharedMemory),
     };
     return {
       resolve: async (sessionId: string) => {
@@ -377,8 +380,8 @@ export class StelloAgent {
   }
 
   /** 写入或覆盖一条共享 memory entry */
-  async upsertSharedMemoryEntry(slug: string, summary: string, body: string): Promise<void> {
-    return this.requireSharedMemory('upsertSharedMemoryEntry').upsert(slug, summary, body);
+  async upsertSharedMemoryEntry(slug: string, body: string): Promise<void> {
+    return this.requireSharedMemory('upsertSharedMemoryEntry').upsert(slug, body);
   }
 
   /** 删除一条共享 memory entry；slug 不存在为 no-op */

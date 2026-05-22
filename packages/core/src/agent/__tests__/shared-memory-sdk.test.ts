@@ -51,24 +51,24 @@ describe('StelloAgent shared memory SDK', () => {
 
   it('upsertSharedMemoryEntry + listSharedMemory round-trip', async () => {
     const agent = makeAgent(new InMemorySharedMemoryStore())
-    await agent.upsertSharedMemoryEntry('a', 'sa', 'ba')
-    await agent.upsertSharedMemoryEntry('b', 'sb', 'bb')
+    await agent.upsertSharedMemoryEntry('a', 'ba')
+    await agent.upsertSharedMemoryEntry('b', 'bb')
     expect(await agent.listSharedMemory()).toEqual([
-      { slug: 'a', summary: 'sa', body: 'ba' },
-      { slug: 'b', summary: 'sb', body: 'bb' },
+      { slug: 'a', body: 'ba' },
+      { slug: 'b', body: 'bb' },
     ])
   })
 
   it('getSharedMemoryEntry returns null when missing, entry when present', async () => {
     const agent = makeAgent(new InMemorySharedMemoryStore())
     expect(await agent.getSharedMemoryEntry('a')).toBeNull()
-    await agent.upsertSharedMemoryEntry('a', 'sa', 'ba')
-    expect(await agent.getSharedMemoryEntry('a')).toEqual({ slug: 'a', summary: 'sa', body: 'ba' })
+    await agent.upsertSharedMemoryEntry('a', 'ba')
+    expect(await agent.getSharedMemoryEntry('a')).toEqual({ slug: 'a', body: 'ba' })
   })
 
   it('removeSharedMemoryEntry deletes the entry', async () => {
     const agent = makeAgent(new InMemorySharedMemoryStore())
-    await agent.upsertSharedMemoryEntry('a', 'sa', 'ba')
+    await agent.upsertSharedMemoryEntry('a', 'ba')
     await agent.removeSharedMemoryEntry('a')
     expect(await agent.getSharedMemoryEntry('a')).toBeNull()
   })
@@ -77,7 +77,7 @@ describe('StelloAgent shared memory SDK', () => {
     const agent = makeAgent(undefined)
     await expect(agent.listSharedMemory()).rejects.toThrow(/sharedMemory not configured/)
     await expect(agent.getSharedMemoryEntry('a')).rejects.toThrow(/sharedMemory not configured/)
-    await expect(agent.upsertSharedMemoryEntry('a', 's', 'b')).rejects.toThrow(/sharedMemory not configured/)
+    await expect(agent.upsertSharedMemoryEntry('a', 'b')).rejects.toThrow(/sharedMemory not configured/)
     await expect(agent.removeSharedMemoryEntry('a')).rejects.toThrow(/sharedMemory not configured/)
   })
 })
