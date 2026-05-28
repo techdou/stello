@@ -71,6 +71,9 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
         role: m.role as 'system' | 'user' | 'assistant' | 'tool',
         content: m.content,
         ...(m.role === 'tool' && m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
+        ...(m.role === 'assistant' && m.reasoningContent
+          ? { reasoning_content: m.reasoningContent }
+          : {}),
         ...(m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
           ? {
               tool_calls: m.toolCalls.map((toolCall) => ({
@@ -100,9 +103,15 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
       ) as ChatCompletion
 
       const choice = response.choices[0]
+      // 提取推理模型的思考内容（stepFun/DeepSeek 等使用 reasoning_content 字段）
+      const rawMessage = choice?.message as Record<string, unknown> | undefined
+      const reasoningContent = typeof rawMessage?.reasoning_content === 'string'
+        ? rawMessage.reasoning_content
+        : null
 
       return {
         content: choice?.message?.content ?? null,
+        ...(reasoningContent ? { reasoningContent } : {}),
         toolCalls: (choice?.message?.tool_calls ?? []).flatMap((call) => {
           if (!('function' in call) || !call.function) return []
           return [{
@@ -131,14 +140,19 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
 
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content ?? ''
+        // 提取推理模型的思考内容增量（stepFun/DeepSeek 等使用 reasoning_content 字段）
+        const rawDelta = chunk.choices[0]?.delta as Record<string, unknown> | undefined
+        const reasoningDelta = typeof rawDelta?.reasoning_content === 'string'
+          ? rawDelta.reasoning_content
+          : undefined
         const toolCallDeltas = (chunk.choices[0]?.delta?.tool_calls ?? []).map((call: ChatToolCallDelta) => ({
           index: call.index ?? 0,
           id: call.id,
           name: call.function?.name,
           input: call.function?.arguments,
         }))
-        if (delta || toolCallDeltas.length > 0) {
-          yield { delta, toolCallDeltas }
+        if (delta || reasoningDelta || toolCallDeltas.length > 0) {
+          yield { delta, ...(reasoningDelta ? { reasoningDelta } : {}), toolCallDeltas }
         }
       }
     },
