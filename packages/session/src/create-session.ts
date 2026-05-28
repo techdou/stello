@@ -250,6 +250,7 @@ function buildSession(
       const assistantRecord: Message = {
         role: 'assistant',
         content: result.content ?? '',
+        ...(result.reasoningContent ? { reasoningContent: result.reasoningContent } : {}),
         ...(result.toolCalls && result.toolCalls.length > 0 ? { toolCalls: result.toolCalls } : {}),
         timestamp: new Date().toISOString(),
       }
@@ -260,6 +261,7 @@ function buildSession(
 
       return {
         content: result.content,
+        reasoningContent: result.reasoningContent,
         toolCalls: result.toolCalls,
         usage: result.usage,
       }
@@ -321,11 +323,13 @@ function buildSession(
         let result: SendResult
         if (options.llm.stream) {
           let accumulated = ''
+          let accumulatedReasoning = ''
           const toolCallsByIndex = new Map<number, { id?: string; name?: string; input: string }>()
           // adapter 在 abort 时抛 AbortError，这里直接向上传播给 result promise；
           // 下方 L3 写入分支不会执行（policy: drop entirely），与非流式 send() 对称。
           for await (const chunk of options.llm.stream(promptMessages, { tools, signal: sendOptions?.signal })) {
             accumulated += chunk.delta
+            if (chunk.reasoningDelta) accumulatedReasoning += chunk.reasoningDelta
             push(chunk.delta)
             for (const delta of chunk.toolCallDeltas ?? []) {
               const current = toolCallsByIndex.get(delta.index) ?? { input: '' }
@@ -340,7 +344,11 @@ function buildSession(
             name: call.name ?? 'unknown_tool',
             input: call.input ? JSON.parse(call.input) as Record<string, unknown> : {},
           }))
-          result = { content: accumulated, toolCalls }
+          result = {
+            content: accumulated,
+            ...(accumulatedReasoning ? { reasoningContent: accumulatedReasoning } : {}),
+            toolCalls,
+          }
         } else {
           result = await options.llm.complete(promptMessages, { tools, signal: sendOptions?.signal })
           if (result.content) {
@@ -351,6 +359,7 @@ function buildSession(
         const assistantRecord: Message = {
           role: 'assistant',
           content: result.content ?? '',
+          ...(result.reasoningContent ? { reasoningContent: result.reasoningContent } : {}),
           ...(result.toolCalls && result.toolCalls.length > 0 ? { toolCalls: result.toolCalls } : {}),
           timestamp: new Date().toISOString(),
         }
@@ -366,6 +375,7 @@ function buildSession(
 
         return {
           content: result.content,
+          reasoningContent: result.reasoningContent,
           toolCalls: result.toolCalls,
           usage: result.usage,
         }

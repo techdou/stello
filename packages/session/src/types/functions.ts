@@ -49,6 +49,8 @@ export interface LoadSessionOptions {
 export interface SendResult {
   /** LLM 文本响应 */
   content: string | null
+  /** 推理模型的思考内容，多轮对话时需回传给 API */
+  reasoningContent?: string | null
   /** LLM 返回的工具调用（由上层决定是否执行） */
   toolCalls?: ToolCall[]
   /** token 用量统计 */

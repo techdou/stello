@@ -2,6 +2,8 @@
 export interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
+  /** 推理模型的思考内容（stepFun/DeepSeek 等），仅 role=assistant 时有效 */
+  reasoningContent?: string
   /** assistant 发起的工具调用列表，仅 role=assistant 时有效 */
   toolCalls?: ToolCall[]
   /** 关联的工具调用 ID，仅 role=tool 时有效 */
@@ -35,6 +37,8 @@ export interface LLMCompleteOptions {
 /** LLM 完成后的返回结果 */
 export interface LLMResult {
   content: string | null
+  /** 推理模型的思考内容，多轮对话时需回传给 API */
+  reasoningContent?: string | null
   toolCalls?: ToolCall[]
   usage?: {
     promptTokens: number
@@ -46,6 +50,8 @@ export interface LLMResult {
 export interface LLMChunk {
   /** 文本增量片段 */
   delta: string
+  /** 推理内容增量片段（stepFun/DeepSeek 等推理模型） */
+  reasoningDelta?: string
   /** 工具调用增量片段（用于流式拼接 tool call） */
   toolCallDeltas?: Array<{
     index: number
