@@ -10,6 +10,8 @@ export interface Message {
   toolCallId?: string
   /** 消息写入时间（ISO 字符串） */
   timestamp?: string
+  /** 持久化层附加元数据（例如 KitKit 的 turnId/turnSeq）。LLM adapter 应忽略该字段。 */
+  metadata?: Record<string, unknown>
 }
 
 /** LLM 返回的工具调用请求 */

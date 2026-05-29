@@ -37,6 +37,18 @@ function parseToolResultEnvelope(content: string): ToolResultEnvelope | null {
   }
 }
 
+function attachTurnMetadata(records: Message[], turnId: string): Message[] {
+  let seq = 0
+  return records.map((record) => ({
+    ...record,
+    metadata: {
+      ...(record.metadata ?? {}),
+      turnId,
+      turnSeq: seq++,
+    },
+  }))
+}
+
 /** 把 tool 执行结果序列化为 tool message content，对齐 OpenAI/Anthropic 标准（只含结果数据）。 */
 function serializeToolResultContent(result: ToolResultEnvelope['toolResults'][number]): string {
   if (!result.success) {
@@ -254,10 +266,10 @@ function buildSession(
         ...(result.toolCalls && result.toolCalls.length > 0 ? { toolCalls: result.toolCalls } : {}),
         timestamp: new Date().toISOString(),
       }
-      for (const record of recordsToPersist) {
+      const turnId = randomUUID()
+      for (const record of attachTurnMetadata([...recordsToPersist, assistantRecord], turnId)) {
         await storage.appendRecord(currentMeta.id, record)
       }
-      await storage.appendRecord(currentMeta.id, assistantRecord)
 
       return {
         content: result.content,
@@ -363,10 +375,10 @@ function buildSession(
           ...(result.toolCalls && result.toolCalls.length > 0 ? { toolCalls: result.toolCalls } : {}),
           timestamp: new Date().toISOString(),
         }
-        for (const record of recordsToPersist) {
+        const turnId = randomUUID()
+        for (const record of attachTurnMetadata([...recordsToPersist, assistantRecord], turnId)) {
           await storage.appendRecord(currentMeta.id, record)
         }
-        await storage.appendRecord(currentMeta.id, assistantRecord)
 
         // 更新 promptTokens 基线
         if (result.usage?.promptTokens) {
