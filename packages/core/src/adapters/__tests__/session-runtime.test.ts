@@ -224,7 +224,7 @@ describe('session-runtime adapters', () => {
         topologyContextProvider: provider,
       });
       await runtime.send('hi');
-      const [, opts] = session.send.mock.calls[0];
+      const [, opts] = session.send.mock.calls[0]!;
       expect(opts).not.toHaveProperty('topologyContext');
     });
 
@@ -240,7 +240,7 @@ describe('session-runtime adapters', () => {
         topologyContextProvider: async () => '',
       });
       await runtime.send('hi');
-      const [, opts] = session.send.mock.calls[0];
+      const [, opts] = session.send.mock.calls[0]!;
       expect(opts).not.toHaveProperty('topologyContext');
     });
 

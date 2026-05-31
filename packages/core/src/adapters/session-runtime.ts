@@ -1,4 +1,4 @@
-import type { ForkContextFn, LLMAdapter, LLMCompleteOptions } from '@stello-ai/session';
+import type { ForkContextFn, LLMAdapter, LLMCompleteOptions, SessionInput } from '@stello-ai/session';
 import type { EngineRuntimeSession } from '../engine/stello-engine';
 import type { ToolCallParser } from '../engine/turn-runner';
 
@@ -23,6 +23,8 @@ export interface SessionCompatibleSendResult {
     completionTokens: number;
   };
 }
+
+export type SessionCompatibleInput = string | SessionInput;
 
 /** 结构兼容 @stello-ai/session 的 consolidate 函数签名 */
 export type SessionCompatibleConsolidateFn = (
@@ -67,11 +69,11 @@ export interface SessionCompatible {
     status: 'active' | 'archived';
   };
   send(
-    content: string,
+    content: SessionCompatibleInput,
     options?: SessionCompatibleSendOptions,
   ): Promise<SessionCompatibleSendResult>;
   stream?(
-    content: string,
+    content: SessionCompatibleInput,
     options?: SessionCompatibleSendOptions,
   ): AsyncIterable<string> & { result: Promise<SessionCompatibleSendResult> };
   messages(): Promise<Array<{ role: string; content: string; timestamp?: string }>>;
@@ -170,7 +172,7 @@ export async function adaptSessionToEngineRuntime(
     get turnCount() {
       return turnCount;
     },
-    async send(input: string, sendOptions?: SessionCompatibleSendOptions): Promise<string> {
+    async send(input: SessionCompatibleInput, sendOptions?: SessionCompatibleSendOptions): Promise<string> {
       const sharedMemoryContext = await options.sharedMemoryContextProvider?.();
       const topologyContext = await options.topologyContextProvider?.(session.meta.id);
       const mergedOptions: SessionCompatibleSendOptions = {
@@ -193,7 +195,7 @@ export async function adaptSessionToEngineRuntime(
     },
     ...(session.stream
       ? {
-          stream(input: string, sendOptions?: SessionCompatibleSendOptions) {
+          stream(input: SessionCompatibleInput, sendOptions?: SessionCompatibleSendOptions) {
             const contextPromise = options.sharedMemoryContextProvider?.() ?? Promise.resolve(undefined);
             const topologyPromise = options.topologyContextProvider?.(session.meta.id) ?? Promise.resolve(undefined);
             const source = (async () => {
@@ -234,4 +236,3 @@ export async function adaptSessionToEngineRuntime(
       : {}),
   };
 }
-

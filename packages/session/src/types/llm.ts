@@ -2,6 +2,8 @@
 export interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
+  /** Provider 中性的多模态内容块。content 仍是文本投影；adapter 可按需使用 parts。 */
+  parts?: ContentPart[]
   /** 推理模型的思考内容（stepFun/DeepSeek 等），仅 role=assistant 时有效 */
   reasoningContent?: string
   /** assistant 发起的工具调用列表，仅 role=assistant 时有效 */
@@ -13,6 +15,65 @@ export interface Message {
   /** 持久化层附加元数据（例如 KitKit 的 turnId/turnSeq）。LLM adapter 应忽略该字段。 */
   metadata?: Record<string, unknown>
 }
+
+export type ContentPart = TextPart | ImagePart | VideoPart | FilePart | AudioPart
+
+export interface TextPart {
+  kind: 'text'
+  text: string
+}
+
+export interface ImagePart {
+  kind: 'image'
+  source: MediaSource
+  detail?: 'low' | 'high' | 'auto'
+  altText?: string
+  filename?: string
+  mediaType?: string
+  sizeBytes?: number
+}
+
+export interface VideoPart {
+  kind: 'video'
+  source: MediaSource
+  filename?: string
+  mediaType?: string
+  durationSeconds?: number
+  sizeBytes?: number
+}
+
+export interface FilePart {
+  kind: 'file'
+  source: MediaSource
+  filename?: string
+  mediaType?: string
+  sizeBytes?: number
+  /** Parsed document text supplied by an upstream document extraction service. */
+  extraction?: DocumentExtraction
+}
+
+export interface DocumentExtraction {
+  provider: 'stepfun'
+  fileId: string
+  status?: 'processed' | 'success' | 'failed'
+  content?: string
+  contentChars?: number
+}
+
+export interface AudioPart {
+  kind: 'audio'
+  source: MediaSource
+  filename?: string
+  mediaType?: string
+  durationSeconds?: number
+  sizeBytes?: number
+}
+
+export type MediaSource =
+  | { type: 'url'; url: string }
+  | { type: 'data'; mediaType: string; data: string }
+  | { type: 'provider_file'; provider: string; fileId: string; uri?: string }
+  | { type: 'kitkit_file'; fileId: string; objectKey: string; backend: 'local' | 's3'; bucket?: string; url?: string }
 
 /** LLM 返回的工具调用请求 */
 export interface ToolCall {

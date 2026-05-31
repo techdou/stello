@@ -1,7 +1,7 @@
 import OpenAI from 'openai'
 import type { ChatCompletion, ChatCompletionChunk } from 'openai/resources/chat/completions'
 import type { Stream } from 'openai/streaming'
-import type { LLMAdapter, LLMResult, Message, LLMCompleteOptions } from '../types/llm.js'
+import type { ContentPart, LLMAdapter, LLMResult, Message, LLMCompleteOptions } from '../types/llm.js'
 
 type ChatToolCallDelta = NonNullable<
   NonNullable<ChatCompletionChunk['choices'][number]['delta']['tool_calls']>[number]
@@ -23,6 +23,8 @@ export interface OpenAICompatibleOptions {
    * 在中途被截断，引发上层 JSON 解析失败。
    */
   maxOutputTokens?: number
+  /** 将 KitKit 托管的多模态文件转成模型服务可访问的 URL。 */
+  resolveMediaUrl?: (source: Extract<Extract<ContentPart, { kind: 'image' | 'video' }>['source'], { type: 'kitkit_file' }>) => string | Promise<string>
 }
 
 /** 合并连续的 system 消息，兼容只接受单条 system 的提供方。 */
@@ -41,6 +43,89 @@ function mergeConsecutiveSystemMessages(messages: Message[]): Message[] {
   return merged
 }
 
+function isStepFun37Flash(options: OpenAICompatibleOptions): boolean {
+  // StepFun 的不同套餐/入口可能使用不同 baseURL（如 /v1 与 /step_plan/v1）。
+  // 多模态能力跟随模型名判断，不能把能力限定死在某一个 endpoint。
+  return options.model === 'step-3.7-flash'
+}
+
+function escapeDocumentAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function renderExtractedFilePart(part: Extract<ContentPart, { kind: 'file' }>): string {
+  const filename = part.filename || '未命名文件'
+  const mediaType = part.mediaType || 'application/octet-stream'
+  const content = part.extraction?.content
+  if (!content) {
+    throw new Error('StepFun file content part requires extracted text content before reaching the OpenAI-compatible adapter')
+  }
+  return [
+    `用户上传了文档：${filename}`,
+    `<document filename="${escapeDocumentAttribute(filename)}" media_type="${escapeDocumentAttribute(mediaType)}">`,
+    content,
+    '</document>',
+  ].join('\n')
+}
+
+async function sourceToURL(part: Extract<ContentPart, { kind: 'image' | 'video' }>, options: OpenAICompatibleOptions): Promise<string> {
+  const source = part.source
+  if (source.type === 'url') return source.url
+  if (source.type === 'data') return `data:${source.mediaType};base64,${source.data}`
+  if (source.type === 'provider_file') {
+    if (source.uri) return source.uri
+    if (source.provider === 'stepfun') return `stepfile://${source.fileId}`
+    throw new Error(`Unsupported provider_file source provider: ${source.provider}`)
+  }
+  if (source.type === 'kitkit_file') {
+    if (options.resolveMediaUrl) return options.resolveMediaUrl(source)
+    if (source.url && /^https?:\/\//.test(source.url)) return source.url
+    throw new Error('kitkit_file source must be converted to a model-readable URL before reaching the OpenAI-compatible adapter')
+  }
+  const unreachable = source as never
+  throw new Error(`Unsupported media source: ${JSON.stringify(unreachable)}`)
+}
+
+async function toOpenAIContent(message: Message, allowMultimodal: boolean, options: OpenAICompatibleOptions): Promise<string | Array<Record<string, unknown>>> {
+  if (!message.parts || message.parts.length === 0) return message.content
+  if (!allowMultimodal) {
+    throw new Error('Multimodal content parts are only supported for StepFun step-3.7-flash in this adapter')
+  }
+  if (message.role !== 'user') {
+    throw new Error(`Multimodal content parts are only supported on user messages, got role=${message.role}`)
+  }
+
+  const blocks: Array<Record<string, unknown>> = []
+  const hasTextPart = message.parts.some((part) => part.kind === 'text')
+  if (message.content && !hasTextPart) {
+    blocks.push({ type: 'text', text: message.content })
+  }
+
+  for (const part of message.parts) {
+    if (part.kind === 'text') {
+      blocks.push({ type: 'text', text: part.text })
+      continue
+    }
+    if (part.kind === 'image') {
+      const imageUrl: Record<string, unknown> = { url: await sourceToURL(part, options) }
+      if (part.detail && part.detail !== 'auto') imageUrl.detail = part.detail
+      blocks.push({ type: 'image_url', image_url: imageUrl })
+      continue
+    }
+    if (part.kind === 'video') {
+      blocks.push({ type: 'video_url', video_url: { url: await sourceToURL(part, options) } })
+      continue
+    }
+    if (part.kind === 'file') {
+      blocks.push({ type: 'text', text: renderExtractedFilePart(part) })
+      continue
+    }
+    throw new Error(`Unsupported multimodal content part kind: ${part.kind}`)
+  }
+
+  return blocks.length > 0 ? blocks : message.content
+}
+
 /** 创建 OpenAI 兼容协议的 LLMAdapter，可对接 MiniMax / DeepSeek / OpenAI 等 */
 export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions): LLMAdapter {
   const client = new OpenAI({
@@ -49,8 +134,9 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
   })
 
   /** 构建公共请求参数 */
-  function buildParams(messages: Message[], completeOptions?: LLMCompleteOptions) {
+  async function buildParams(messages: Message[], completeOptions?: LLMCompleteOptions) {
     const normalizedMessages = mergeConsecutiveSystemMessages(messages)
+    const allowMultimodal = isStepFun37Flash(options)
     return {
       model: options.model,
       max_tokens: completeOptions?.maxTokens ?? options.maxOutputTokens ?? 4096,
@@ -67,9 +153,9 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
             })),
           }
         : {}),
-      messages: normalizedMessages.map((m) => ({
+      messages: await Promise.all(normalizedMessages.map(async (m) => ({
         role: m.role as 'system' | 'user' | 'assistant' | 'tool',
-        content: m.content,
+        content: await toOpenAIContent(m, allowMultimodal, options),
         ...(m.role === 'tool' && m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
         ...(m.role === 'assistant' && m.reasoningContent
           ? { reasoning_content: m.reasoningContent }
@@ -86,7 +172,7 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
               })),
             }
           : {}),
-      })),
+      }))),
     }
   }
 
@@ -95,7 +181,7 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
     async complete(messages: Message[], completeOptions?: LLMCompleteOptions): Promise<LLMResult> {
       const response = await client.chat.completions.create(
         {
-          ...buildParams(messages, completeOptions),
+          ...(await buildParams(messages, completeOptions)),
           ...(options.extraBody ?? {}),
           stream: false,
         } as Parameters<typeof client.chat.completions.create>[0],
@@ -131,7 +217,7 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
     async *stream(messages: Message[], completeOptions?: LLMCompleteOptions) {
       const stream = await client.chat.completions.create(
         {
-          ...buildParams(messages, completeOptions),
+          ...(await buildParams(messages, completeOptions)),
           ...(options.extraBody ?? {}),
           stream: true,
         } as Parameters<typeof client.chat.completions.create>[0],

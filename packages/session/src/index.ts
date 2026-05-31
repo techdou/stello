@@ -2,10 +2,12 @@
 export type { SessionMeta, SessionMetaUpdate, SessionFilter, ForkOptions, ForkContextFn } from './types/session.js'
 export type { SessionStorage, ListRecordsOptions, CompressionCacheSnapshot } from './types/storage.js'
 export type {
-  Message, ToolCall, LLMCompleteOptions, LLMResult, LLMChunk, LLMAdapter,
+  Message, ContentPart, TextPart, ImagePart, VideoPart, FilePart, AudioPart, MediaSource,
+  ToolCall, LLMCompleteOptions, LLMResult, LLMChunk, LLMAdapter,
 } from './types/llm.js'
 export type {
   Session,
+  SessionInput,
   MessageQueryOptions,
   SessionSendOptions,
 } from './types/session-api.js'

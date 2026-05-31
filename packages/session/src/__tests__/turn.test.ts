@@ -73,6 +73,37 @@ describe('send() 契约', () => {
     expect(secondCall[4]!.content).toBe('问题2')
   })
 
+  it('send() 支持当前 turn 多模态 parts，持久化但不在后续历史中重复回放', async () => {
+    const capturedMessages: Message[][] = []
+    const llm = createMockLLM([{ content: '看到了' }, { content: '继续' }])
+    const originalComplete = llm.complete.bind(llm)
+    llm.complete = async (msgs, options) => {
+      capturedMessages.push(msgs.map((msg) => ({ ...msg, parts: msg.parts ? [...msg.parts] : undefined })))
+      return originalComplete(msgs, options)
+    }
+    const { session } = await makeSession({ llm })
+    const parts: Message['parts'] = [
+      { kind: 'image', source: { type: 'url', url: 'https://example.com/a.png' }, detail: 'high' },
+    ]
+
+    await session.send({ text: '描述这张图', parts })
+
+    const firstUserMessage = capturedMessages[0]!.find((message) => message.role === 'user')!
+    expect(firstUserMessage.content).toBe('描述这张图')
+    expect(firstUserMessage.parts).toEqual(parts)
+
+    const persistedAfterFirstTurn = await session.messages()
+    expect(persistedAfterFirstTurn[0]).toMatchObject({ role: 'user', content: '描述这张图', parts })
+
+    await session.send('继续分析')
+
+    const secondCall = capturedMessages[1]!
+    const historicalUser = secondCall.find((message) => message.role === 'user' && message.content === '描述这张图')!
+    const currentUser = secondCall.find((message) => message.role === 'user' && message.content === '继续分析')!
+    expect(historicalUser.parts).toBeUndefined()
+    expect(currentUser.parts).toBeUndefined()
+  })
+
   it('send() 返回 toolCalls 时透传', async () => {
     const responseWithTools: LLMResult = {
       content: null,
