@@ -3,15 +3,15 @@ import type { BootstrapResult } from '../types/lifecycle';
 import type { StelloEngine, EngineForkOptions } from '../types/engine';
 import type { EngineTurnResult } from '../engine/stello-engine';
 import type { EngineStreamResult } from '../engine/stello-engine';
-import type { TurnRunnerOptions } from '../engine/turn-runner';
+import type { TurnInput, TurnRunnerOptions } from '../engine/turn-runner';
 import type { EngineRuntimeManager } from './engine-runtime-manager';
 
 /** Orchestrator 对 Engine 的最小依赖 */
 export interface OrchestratorEngine extends StelloEngine {
   /** 运行当前 session 的一轮对话 */
-  turn(input: string, options?: TurnRunnerOptions): Promise<EngineTurnResult>;
+  turn(input: TurnInput, options?: TurnRunnerOptions): Promise<EngineTurnResult>;
   /** 流式运行当前 session 的一轮对话 */
-  stream(input: string, options?: TurnRunnerOptions): EngineStreamResult;
+  stream(input: TurnInput, options?: TurnRunnerOptions): EngineStreamResult;
   /** 归档当前绑定 session */
   archiveSession(): Promise<{ sessionId: string }>;
   /** 从当前绑定 session 发起 fork */
@@ -59,7 +59,7 @@ export class SessionOrchestrator {
   /** 在指定 session 上运行一轮对话 */
   async turn(
     sessionId: string,
-    input: string,
+    input: TurnInput,
     options?: TurnRunnerOptions,
   ): Promise<EngineTurnResult> {
     return this.runSerial(sessionId, async () => {
@@ -71,7 +71,7 @@ export class SessionOrchestrator {
   /** 在指定 session 上流式运行一轮对话 */
   async stream(
     sessionId: string,
-    input: string,
+    input: TurnInput,
     options?: TurnRunnerOptions,
   ): Promise<EngineStreamResult> {
     await this.requireSession(sessionId)

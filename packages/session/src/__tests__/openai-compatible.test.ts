@@ -166,6 +166,113 @@ describe('createOpenAICompatibleAdapter', () => {
     expect(result.reasoningContent).toBeUndefined()
   })
 
+  it('StepFun 3.7 将 image/video parts 转成 Chat Completions 多模态 content', async () => {
+    const adapter = createOpenAICompatibleAdapter({
+      apiKey: 'test-key',
+      baseURL: 'https://api.stepfun.com/v1',
+      model: 'step-3.7-flash',
+      maxContextTokens: 128_000,
+    })
+
+    await adapter.complete([{ role: 'user', content: '看一下', parts: [
+      { kind: 'image', source: { type: 'url', url: 'https://example.com/a.png' }, detail: 'high' },
+      { kind: 'video', source: { type: 'url', url: 'https://example.com/a.mp4' } },
+    ] }])
+
+    const sentMessages = createCompletion.mock.calls[0]![0].messages
+    expect(sentMessages[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: '看一下' },
+        { type: 'image_url', image_url: { url: 'https://example.com/a.png', detail: 'high' } },
+        { type: 'video_url', video_url: { url: 'https://example.com/a.mp4' } },
+      ],
+    })
+  })
+  it('StepFun 3.7 多模态能力不绑定固定 baseURL', async () => {
+    const adapter = createOpenAICompatibleAdapter({
+      apiKey: 'test-key',
+      baseURL: 'https://api.stepfun.com/step_plan/v1',
+      model: 'step-3.7-flash',
+      maxContextTokens: 128_000,
+    })
+
+    await adapter.complete([{ role: 'user', content: '描述图片', parts: [
+      { kind: 'image', source: { type: 'url', url: 'https://example.com/a.png' } },
+    ] }])
+
+    expect(createCompletion.mock.calls[0]![0].messages[0].content).toEqual([
+      { type: 'text', text: '描述图片' },
+      { type: 'image_url', image_url: { url: 'https://example.com/a.png' } },
+    ])
+  })
+  it('StepFun 3.7 支持 data URL 与 stepfile provider_file', async () => {
+    const adapter = createOpenAICompatibleAdapter({
+      apiKey: 'test-key',
+      baseURL: 'https://api.stepfun.com/step_plan/v1',
+      model: 'step-3.7-flash',
+      maxContextTokens: 128_000,
+    })
+
+    await adapter.complete([{ role: 'user', content: '比较', parts: [
+      { kind: 'image', source: { type: 'data', mediaType: 'image/png', data: 'abc123' } },
+      { kind: 'video', source: { type: 'provider_file', provider: 'stepfun', fileId: 'file_123' } },
+    ] }])
+
+    expect(createCompletion.mock.calls[0]![0].messages[0].content).toEqual([
+      { type: 'text', text: '比较' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,abc123' } },
+      { type: 'video_url', video_url: { url: 'stepfile://file_123' } },
+    ])
+  })
+
+  it('StepFun 3.7 将已解析 file part 转成文本块并保留原始用户问题', async () => {
+    const adapter = createOpenAICompatibleAdapter({
+      apiKey: 'test-key',
+      baseURL: 'https://api.stepfun.com/step_plan/v1',
+      model: 'step-3.7-flash',
+      maxContextTokens: 128_000,
+    })
+
+    await adapter.complete([{ role: 'user', content: '总结重点', parts: [
+      {
+        kind: 'file',
+        source: { type: 'kitkit_file', fileId: 'mmf_1', objectKey: 'multimodal/doc.pdf', backend: 's3' },
+        filename: 'report.pdf',
+        mediaType: 'application/pdf',
+        extraction: { provider: 'stepfun', fileId: 'file-C0DD', status: 'success', content: '第一章：项目概况' },
+      },
+    ] }])
+
+    const sentMessages = createCompletion.mock.calls[0]![0].messages
+    expect(sentMessages[0].content).toEqual([
+      { type: 'text', text: '总结重点' },
+      {
+        type: 'text',
+        text: [
+          '用户上传了文档：report.pdf',
+          '<document filename="report.pdf" media_type="application/pdf">',
+          '第一章：项目概况',
+          '</document>',
+        ].join('\n'),
+      },
+    ])
+  })
+
+  it('非 StepFun 3.7 模型收到 parts 时明确报错', async () => {
+    const adapter = createOpenAICompatibleAdapter({
+      apiKey: 'test-key',
+      baseURL: 'https://api.example.com/v1',
+      model: 'other-model',
+      maxContextTokens: 128_000,
+    })
+
+    await expect(adapter.complete([{ role: 'user', content: '看图', parts: [
+      { kind: 'image', source: { type: 'url', url: 'https://example.com/a.png' } },
+    ] }])).rejects.toThrow('Multimodal content parts are only supported for StepFun step-3.7-flash')
+    expect(createCompletion).not.toHaveBeenCalled()
+  })
+
   it('signal 透传到 SDK request options', async () => {
     const adapter = createOpenAICompatibleAdapter({
       apiKey: 'test-key',

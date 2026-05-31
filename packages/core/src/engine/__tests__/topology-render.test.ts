@@ -3,7 +3,7 @@ import type { SessionTreeNode } from '../../types/session.js';
 import { renderTopologyMarkdown } from '../topology-render.js';
 
 function node(id: string, label: string, children: SessionTreeNode[] = [], status: 'active' | 'archived' = 'active'): SessionTreeNode {
-  return { id, label, parentId: null, status, children } as SessionTreeNode;
+  return { id, label, parentId: null, status, children, turnCount: 0 } as SessionTreeNode;
 }
 
 describe('renderTopologyMarkdown', () => {

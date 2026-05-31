@@ -33,7 +33,13 @@ import {
   type TurnRunnerOptions,
   type TurnRunnerResult,
   type TurnRunnerStreamResult,
+  type TurnInput,
 } from './turn-runner';
+
+
+function turnInputText(input: TurnInput): string {
+  return typeof input === 'string' ? input : input.text;
+}
 
 /** Engine 调用 session.send/stream 时的运行时选项 */
 export interface EngineRuntimeSessionCallOptions {
@@ -54,10 +60,10 @@ export interface EngineRuntimeSession {
   /** 当前已完成轮次 */
   turnCount: number;
   /** 运行一次单条对话 */
-  send(input: string, options?: EngineRuntimeSessionCallOptions): Promise<string>;
+  send(input: TurnInput, options?: EngineRuntimeSessionCallOptions): Promise<string>;
   /** 可选：流式运行一次单条对话 */
   stream?(
-    input: string,
+    input: TurnInput,
     options?: EngineRuntimeSessionCallOptions,
   ): AsyncIterable<string> & { result: Promise<string> };
   /** fork 子 session，返回子 session 的 runtime */
@@ -216,9 +222,10 @@ export class StelloEngineImpl implements StelloEngine {
   }
 
   /** 处理一轮编排：当前 session send + tool loop + 调度 */
-  async turn(input: string, options?: TurnRunnerOptions): Promise<EngineTurnResult> {
-    this.fireHook('onMessageReceived', { sessionId: this.session.id, input });
-    this.fireHook('onRoundStart', { sessionId: this.session.id, input });
+  async turn(input: TurnInput, options?: TurnRunnerOptions): Promise<EngineTurnResult> {
+    const inputText = turnInputText(input);
+    this.fireHook('onMessageReceived', { sessionId: this.session.id, input: inputText });
+    this.fireHook('onRoundStart', { sessionId: this.session.id, input: inputText });
     let turn: TurnRunnerResult;
     try {
       turn = await this.turnRunner.run(this.session, input, this, {
@@ -238,20 +245,21 @@ export class StelloEngineImpl implements StelloEngine {
     }
     this.fireHook('onAssistantReply', {
       sessionId: this.session.id,
-      input,
+      input: inputText,
       content: turn.finalContent,
       rawResponse: turn.rawResponse,
     });
     this.fireHook('onRoundEnd', {
       sessionId: this.session.id,
-      input,
+      input: inputText,
       turn,
     });
     return { turn };
   }
 
   /** 流式处理一轮编排：先输出增量文本，完成后再返回完整 turn */
-  stream(input: string, options?: TurnRunnerOptions): EngineStreamResult {
+  stream(input: TurnInput, options?: TurnRunnerOptions): EngineStreamResult {
+    const inputText = turnInputText(input);
     const source: TurnRunnerStreamResult = this.turnRunner.runStream(this.session, input, this, {
       ...options,
       onToolCall: (toolCall) => {
@@ -265,8 +273,8 @@ export class StelloEngineImpl implements StelloEngine {
     });
 
     const result = (async () => {
-      this.fireHook('onMessageReceived', { sessionId: this.session.id, input });
-      this.fireHook('onRoundStart', { sessionId: this.session.id, input });
+      this.fireHook('onMessageReceived', { sessionId: this.session.id, input: inputText });
+      this.fireHook('onRoundStart', { sessionId: this.session.id, input: inputText });
 
       let turn: TurnRunnerResult;
       try {
@@ -278,13 +286,13 @@ export class StelloEngineImpl implements StelloEngine {
 
       this.fireHook('onAssistantReply', {
         sessionId: this.session.id,
-        input,
+        input: inputText,
         content: turn.finalContent,
         rawResponse: turn.rawResponse,
       });
       this.fireHook('onRoundEnd', {
         sessionId: this.session.id,
-        input,
+        input: inputText,
         turn,
       });
       return { turn };

@@ -1,5 +1,5 @@
 import type { BootstrapResult } from '../types/lifecycle';
-import { TurnRunner, type ToolCallParser, type TurnRunnerOptions } from '../engine/turn-runner';
+import { TurnRunner, type ToolCallParser, type TurnInput, type TurnRunnerOptions } from '../engine/turn-runner';
 import type { EngineTurnResult } from '../engine/stello-engine';
 import type { EngineStreamResult } from '../engine/stello-engine';
 import {
@@ -447,7 +447,7 @@ export class StelloAgent {
   /** 在指定 session 上运行一轮对话 */
   turn(
     sessionId: string,
-    input: string,
+    input: TurnInput,
     options?: TurnRunnerOptions,
   ): Promise<EngineTurnResult> {
     return this.orchestrator.turn(sessionId, input, options);
@@ -456,7 +456,7 @@ export class StelloAgent {
   /** 在指定 session 上流式运行一轮对话 */
   stream(
     sessionId: string,
-    input: string,
+    input: TurnInput,
     options?: TurnRunnerOptions,
   ): Promise<EngineStreamResult> {
     return this.orchestrator.stream(sessionId, input, options);

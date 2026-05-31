@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Session, MessageQueryOptions, SessionSendOptions } from './types/session-api.js'
+import type { Session, MessageQueryOptions, SessionInput, SessionSendOptions } from './types/session-api.js'
 import { SessionArchivedError } from './types/session-api.js'
 import type { SessionMeta, SessionMetaUpdate, ForkOptions } from './types/session.js'
 import type { Message } from './types/llm.js'
@@ -49,6 +49,14 @@ function attachTurnMetadata(records: Message[], turnId: string): Message[] {
   }))
 }
 
+function normalizeSessionInput(input: string | SessionInput): { text: string; parts?: Message['parts'] } {
+  if (typeof input === 'string') return { text: input }
+  return {
+    text: input.text,
+    ...(input.parts && input.parts.length > 0 ? { parts: input.parts } : {}),
+  }
+}
+
 /** 把 tool 执行结果序列化为 tool message content，对齐 OpenAI/Anthropic 标准（只含结果数据）。 */
 function serializeToolResultContent(result: ToolResultEnvelope['toolResults'][number]): string {
   if (!result.success) {
@@ -57,6 +65,14 @@ function serializeToolResultContent(result: ToolResultEnvelope['toolResults'][nu
   if (typeof result.data === 'string') return result.data
   if (result.data == null) return ''
   return JSON.stringify(result.data)
+}
+
+function stripMultimodalParts(records: Message[]): Message[] {
+  return records.map((record) => {
+    if (!record.parts) return record
+    const { parts: _parts, ...rest } = record
+    return rest
+  })
 }
 
 /** 为 toolResults continuation 组装固定上下文与历史。 */
@@ -99,7 +115,7 @@ async function assembleSessionReplayContext(
   // 注意：此处刻意不调用 removeIncompleteToolCallGroups。
   // replay 路径会把"assistant(toolCalls) + 由 envelope 合成的 tool 消息"拼接成完整组，
   // 在加载阶段过早裁剪反而会把回灌目标删掉。完整组校验放在拼接后由调用方做。
-  const history = await storage.listRecords(sessionId)
+  const history = stripMultimodalParts(await storage.listRecords(sessionId))
   messages.push(...history)
   return { messages, insightConsumed }
 }
@@ -204,7 +220,7 @@ function buildSession(
       return currentMeta
     },
 
-    async send(content: string, sendOptions?: SessionSendOptions): Promise<SendResult> {
+    async send(input: string | SessionInput, sendOptions?: SessionSendOptions): Promise<SendResult> {
       if (currentMeta.status === 'archived') {
         throw new SessionArchivedError(currentMeta.id)
       }
@@ -213,6 +229,8 @@ function buildSession(
       }
       // pre-flight：已 abort 的 signal 立即抛出，不发起任何 LLM 请求
       sendOptions?.signal?.throwIfAborted()
+      const normalizedInput = normalizeSessionInput(input)
+      const content = normalizedInput.text
 
       // 组装上下文（自动压缩）
       const assembled = await assembleSessionContext(
@@ -221,6 +239,7 @@ function buildSession(
         currentMeta.label,
         sendOptions?.sharedMemoryContext,
         sendOptions?.topologyContext,
+        normalizedInput.parts,
       )
       persistAndApplyCompressionCache(assembled.compressionCache)
 
@@ -230,7 +249,12 @@ function buildSession(
       }
 
       let promptMessages = assembled.messages
-      let recordsToPersist: Message[] = [{ role: 'user', content, timestamp: assembled.userTimestamp }]
+      let recordsToPersist: Message[] = [{
+        role: 'user',
+        content,
+        timestamp: assembled.userTimestamp,
+        ...(normalizedInput.parts ? { parts: normalizedInput.parts } : {}),
+      }]
       const toolEnvelope = parseToolResultEnvelope(content)
       if (toolEnvelope) {
         const replayContext = await assembleSessionReplayContext(currentMeta.id, storage, currentMeta.label, sendOptions?.sharedMemoryContext, sendOptions?.topologyContext)
@@ -279,7 +303,7 @@ function buildSession(
       }
     },
 
-    stream(content: string, sendOptions?: SessionSendOptions): StreamResult {
+    stream(input: string | SessionInput, sendOptions?: SessionSendOptions): StreamResult {
       if (currentMeta.status === 'archived') {
         throw new SessionArchivedError(currentMeta.id)
       }
@@ -290,6 +314,8 @@ function buildSession(
       return createStreamResult(async (push) => {
         // pre-flight：已 abort 的 signal 立即让 result reject，processor 不进入下游
         sendOptions?.signal?.throwIfAborted()
+        const normalizedInput = normalizeSessionInput(input)
+        const content = normalizedInput.text
 
         // 组装上下文（自动压缩）
         const assembled = await assembleSessionContext(
@@ -298,6 +324,7 @@ function buildSession(
           currentMeta.label,
           sendOptions?.sharedMemoryContext,
           sendOptions?.topologyContext,
+          normalizedInput.parts,
         )
         persistAndApplyCompressionCache(assembled.compressionCache)
 
@@ -307,7 +334,12 @@ function buildSession(
         }
 
         let promptMessages = assembled.messages
-        let recordsToPersist: Message[] = [{ role: 'user', content, timestamp: assembled.userTimestamp }]
+        let recordsToPersist: Message[] = [{
+          role: 'user',
+          content,
+          timestamp: assembled.userTimestamp,
+          ...(normalizedInput.parts ? { parts: normalizedInput.parts } : {}),
+        }]
         const toolEnvelope = parseToolResultEnvelope(content)
         if (toolEnvelope) {
           const replayContext = await assembleSessionReplayContext(currentMeta.id, storage, currentMeta.label, sendOptions?.sharedMemoryContext, sendOptions?.topologyContext)

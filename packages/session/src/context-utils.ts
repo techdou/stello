@@ -45,6 +45,14 @@ export function removeIncompleteToolCallGroups(records: Message[]): Message[] {
   return result
 }
 
+function stripMultimodalParts(messages: Message[]): Message[] {
+  return messages.map((message) => {
+    if (!message.parts) return message
+    const { parts: _parts, ...rest } = message
+    return rest
+  })
+}
+
 /** 内置默认压缩提示词 */
 const BUILTIN_COMPRESS_PROMPT = `你是对话压缩助手。请将以下对话历史压缩为一段简洁的摘要，保留关键上下文信息。
 要求：
@@ -181,6 +189,7 @@ export async function assembleSessionContext(
   label?: string,
   sharedMemoryContext?: string,
   topologyContext?: string,
+  userParts?: Message['parts'],
 ): Promise<AssembleResult> {
   const prefixMessages: Message[] = []
   let insightConsumed = false
@@ -212,10 +221,15 @@ export async function assembleSessionContext(
   }
 
   const userTimestamp = new Date().toISOString()
-  const userMessage: Message = { role: 'user', content: userContent, timestamp: userTimestamp }
+  const userMessage: Message = {
+    role: 'user',
+    content: userContent,
+    timestamp: userTimestamp,
+    ...(userParts && userParts.length > 0 ? { parts: userParts } : {}),
+  }
 
   // 净化历史：移除中断/崩溃残留的不完整 tool call 组，保证送给 LLM 的 prompt 协议合法
-  const history = removeIncompleteToolCallGroups(await storage.listRecords(sessionId))
+  const history = stripMultimodalParts(removeIncompleteToolCallGroups(await storage.listRecords(sessionId)))
 
   // 估算全量 token 数
   const fullMessages = [...prefixMessages, ...history, userMessage]
