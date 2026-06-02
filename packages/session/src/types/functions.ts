@@ -1,32 +1,11 @@
 import type { Message, LLMAdapter, ToolCall, LLMCompleteOptions } from './llm.js'
-import type { SessionStorage, MainStorage } from './storage.js'
+import type { SessionStorage } from './storage.js'
 
 /** consolidate 函数签名：L3 → L2，接收当前 L2 和 L3 记录，返回新 L2 */
 export type ConsolidateFn = (currentMemory: string | null, messages: Message[]) => Promise<string>
 
 /** 上下文压缩函数签名：接收需压缩的消息列表，返回摘要文本 */
 export type CompressFn = (messages: Message[]) => Promise<string>
-
-/** 子 Session 的 L2 摘要，供 IntegrateFn 消费 */
-export interface ChildL2Summary {
-  sessionId: string
-  label: string
-  l2: string
-}
-
-/** IntegrateFn 的返回结果 */
-export interface IntegrateResult {
-  /** Main Session 的综合认知 */
-  synthesis: string
-  /** 推送给各子 Session 的定向 insights */
-  insights: Array<{ sessionId: string; content: string }>
-}
-
-/** integrate 函数签名：所有子 L2 + 当前 synthesis → 新 synthesis + per-child insights */
-export type IntegrateFn = (
-  children: ChildL2Summary[],
-  currentSynthesis: string | null
-) => Promise<IntegrateResult>
 
 /** createSession() 的选项 */
 export interface CreateSessionOptions {
@@ -40,10 +19,6 @@ export interface CreateSessionOptions {
   label?: string
   /** 系统提示词 */
   systemPrompt?: string
-  /** 初始标签 */
-  tags?: string[]
-  /** 初始元数据 */
-  metadata?: Record<string, unknown>
   /** 可用工具定义 */
   tools?: LLMCompleteOptions['tools']
   /** 上下文压缩函数（超阈值时调用） */
@@ -70,50 +45,12 @@ export interface LoadSessionOptions {
 
 }
 
-/** createMainSession() 的选项 */
-export interface CreateMainSessionOptions {
-  /** 指定存储适配器（Main Session 需要 MainStorage） */
-  storage: MainStorage
-  /** 指定 LLM 适配器 */
-  llm?: LLMAdapter
-  /** Main Session 标签 */
-  label?: string
-  /** 系统提示词 */
-  systemPrompt?: string
-  /** 初始标签 */
-  tags?: string[]
-  /** 初始元数据 */
-  metadata?: Record<string, unknown>
-  /** 可用工具定义 */
-  tools?: LLMCompleteOptions['tools']
-  /** 上下文压缩函数（超阈值时调用） */
-  compressFn?: CompressFn
-  /** 所有子 L2 → synthesis + insights，创建时绑定，供 integrate() 调用 */
-  integrateFn?: IntegrateFn
-
-}
-
-/** loadMainSession() 的选项 */
-export interface LoadMainSessionOptions {
-  /** 指定存储适配器（Main Session 需要 MainStorage） */
-  storage: MainStorage
-  /** LLM 适配器 */
-  llm?: LLMAdapter
-  /** 系统提示词 */
-  systemPrompt?: string
-  /** 可用工具定义 */
-  tools?: LLMCompleteOptions['tools']
-  /** 上下文压缩函数（超阈值时调用） */
-  compressFn?: CompressFn
-  /** 所有子 L2 → synthesis + insights，加载时绑定，供 integrate() 调用 */
-  integrateFn?: IntegrateFn
-
-}
-
 /** send() 的返回结果 */
 export interface SendResult {
   /** LLM 文本响应 */
   content: string | null
+  /** 推理模型的思考内容，多轮对话时需回传给 API */
+  reasoningContent?: string | null
   /** LLM 返回的工具调用（由上层决定是否执行） */
   toolCalls?: ToolCall[]
   /** token 用量统计 */

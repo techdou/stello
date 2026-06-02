@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { SessionStorage } from '@stello-ai/session';
 import type { SessionTree } from '../../types/session';
-import type { MemoryEngine } from '../../types/memory';
 import type { ConfirmProtocol, SkillRouter } from '../../types/lifecycle';
 import { createStelloAgent, type StelloAgentConfig } from '../stello-agent';
 
@@ -39,7 +39,6 @@ describe('StelloAgent', () => {
         archive: vi.fn(),
         ...overrides?.sessions,
       } as unknown as SessionTree,
-      memory: {} as MemoryEngine,
       capabilities: {
         lifecycle: {
           bootstrap: vi.fn().mockResolvedValue({
@@ -197,7 +196,7 @@ describe('StelloAgent', () => {
       fork: sessionFork,
     };
 
-    const createChild = vi.fn().mockResolvedValue({
+    const createSession = vi.fn().mockResolvedValue({
       id: 'child-2', parentId: 'child-1', children: [], refs: [], depth: 2, index: 0, label: 'UI 2',
     });
 
@@ -209,11 +208,10 @@ describe('StelloAgent', () => {
           return null;
         }),
         archive: vi.fn(),
-        createChild,
+        createSession,
         getConfig: vi.fn().mockResolvedValue(null),
         putConfig: vi.fn().mockResolvedValue(undefined),
       } as unknown as SessionTree,
-      memory: {} as MemoryEngine,
       capabilities: {
         lifecycle: {
           bootstrap: vi.fn(),
@@ -249,7 +247,7 @@ describe('StelloAgent', () => {
     const result = await agent.forkSession('child-1', { label: 'UI 2' });
 
     // engine 用 `options.topologyParentId ?? this.session.id` 默认挂到 source（child-1）下
-    expect(createChild).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({
       label: 'UI 2',
       parentId: 'child-1',
     }));
@@ -327,20 +325,6 @@ describe('StelloAgent', () => {
     expect(agent.config.sessionDefaults?.skills).toEqual(['read_file']);
   });
 
-  it('会保留 mainSessionConfig 独立配置（不参与 fork 合成链）', () => {
-    const integrateFn = vi.fn();
-    const agent = createStelloAgent({
-      ...baseConfig(),
-      mainSessionConfig: {
-        systemPrompt: 'main prompt',
-        integrateFn,
-      },
-    });
-
-    expect(agent.config.mainSessionConfig?.systemPrompt).toBe('main prompt');
-    expect(agent.config.mainSessionConfig?.integrateFn).toBe(integrateFn);
-  });
-
   it('updateConfig 可热更新 runtime 配置', async () => {
     vi.useFakeTimers();
 
@@ -382,24 +366,6 @@ describe('StelloAgent', () => {
     expect(runtimeSession.consolidate).toHaveBeenCalledTimes(1);
   });
 
-  it('integrate 调用 mainSession.integrate', async () => {
-    const integrateFn = vi.fn().mockResolvedValue({ synthesis: 's', insights: [] });
-    const mainSession = { integrate: integrateFn };
-    const agent = createStelloAgent({
-      ...baseConfig(),
-      session: {
-        mainSessionLoader: vi.fn().mockResolvedValue({ session: mainSession, config: null }),
-      },
-    });
-    await agent.integrate();
-    expect(integrateFn).toHaveBeenCalledTimes(1);
-  });
-
-  it('integrate 未配置 mainSessionLoader 时抛错', async () => {
-    const agent = createStelloAgent(baseConfig());
-    await expect(agent.integrate()).rejects.toThrow('No mainSessionLoader configured');
-  });
-
   it('支持通过 session.sessionLoader 正式接入 Session 配置', async () => {
     const session = {
       meta: {
@@ -428,7 +394,6 @@ describe('StelloAgent', () => {
         get: vi.fn().mockResolvedValue(rootSession),
         archive: vi.fn(),
       } as unknown as SessionTree,
-      memory: {} as MemoryEngine,
       session: {
         sessionLoader: vi.fn().mockResolvedValue({ session, config: null }),
       },
@@ -461,135 +426,314 @@ describe('StelloAgent', () => {
     expect(result.turn.toolCallsExecuted).toBe(1);
   });
 
-  describe('createMainSession', () => {
-    /** 构建带 createRoot/putConfig/getConfig 能力的 sessions mock */
-    function sessionsMock() {
-      const store = new Map<string, unknown>();
-      const createRoot = vi.fn().mockImplementation(async (label?: string) => ({
-        id: 'root',
+  describe('createSession', () => {
+    it('createSession 无 parentId 时建 root', async () => {
+      const createSession = vi.fn().mockResolvedValue({
+        id: 'root-id',
         parentId: null,
         children: [],
         refs: [],
         depth: 0,
         index: 0,
-        label: label ?? 'Root',
-      }));
-      const putConfig = vi.fn().mockImplementation(async (id: string, config: unknown) => {
-        store.set(id, config);
+        label: 'My Root',
       });
-      const getConfig = vi.fn().mockImplementation(async (id: string) => store.get(id) ?? null);
-      return { createRoot, putConfig, getConfig, store };
+      const agent = createStelloAgent(
+        baseConfig({ sessions: { createSession } as unknown as SessionTree }),
+      );
+      const node = await agent.createSession({ label: 'My Root' });
+      expect(createSession).toHaveBeenCalledWith({ label: 'My Root' });
+      expect(node.parentId).toBeNull();
+    });
+
+    it('createSession 带 parentId 时挂在父下', async () => {
+      const createSession = vi.fn().mockResolvedValue({
+        id: 'child-id',
+        parentId: 'root-id',
+        children: [],
+        refs: [],
+        depth: 1,
+        index: 0,
+        label: 'Child',
+      });
+      const agent = createStelloAgent(
+        baseConfig({ sessions: { createSession } as unknown as SessionTree }),
+      );
+      const node = await agent.createSession({ parentId: 'root-id', label: 'Child' });
+      expect(createSession).toHaveBeenCalledWith({ parentId: 'root-id', label: 'Child' });
+      expect(node.parentId).toBe('root-id');
+    });
+
+    it('createSession 不传参数时调用 sessions.createSession({})', async () => {
+      const createSession = vi.fn().mockResolvedValue({
+        id: 'r',
+        parentId: null,
+        children: [],
+        refs: [],
+        depth: 0,
+        index: 0,
+        label: 'Root',
+      });
+      const agent = createStelloAgent(
+        baseConfig({ sessions: { createSession } as unknown as SessionTree }),
+      );
+      await agent.createSession();
+      expect(createSession).toHaveBeenCalledWith({});
+    });
+  });
+
+  describe('orchestrator-facing topology SDK', () => {
+    it('listSessions 代理 sessions.listAll', async () => {
+      const listAll = vi.fn().mockResolvedValue([
+        { id: 'a', label: 'A', status: 'active', turnCount: 0, createdAt: '', updatedAt: '', lastActiveAt: '' },
+        { id: 'b', label: 'B', status: 'archived', turnCount: 0, createdAt: '', updatedAt: '', lastActiveAt: '' },
+      ]);
+      const agent = createStelloAgent(
+        baseConfig({ sessions: { listAll } as unknown as SessionTree }),
+      );
+      expect(await agent.listSessions()).toHaveLength(2);
+      const activeOnly = await agent.listSessions({ status: 'active' });
+      expect(activeOnly).toHaveLength(1);
+      expect(activeOnly[0]?.id).toBe('a');
+    });
+
+    it('listRoots 代理 sessions.listRoots', async () => {
+      const listRoots = vi.fn().mockResolvedValue([
+        { id: 'r1', parentId: null, children: [], refs: [], depth: 0, index: 0, label: 'R1' },
+      ]);
+      const agent = createStelloAgent(
+        baseConfig({ sessions: { listRoots } as unknown as SessionTree }),
+      );
+      const roots = await agent.listRoots();
+      expect(roots).toHaveLength(1);
+      expect(roots[0]?.parentId).toBeNull();
+    });
+
+    it('getTopology 代理 sessions.getTree 并返回森林', async () => {
+      const getTree = vi.fn().mockResolvedValue([
+        { id: 'r1', label: 'R1', status: 'active', turnCount: 0, children: [] },
+        { id: 'r2', label: 'R2', status: 'active', turnCount: 0, children: [] },
+      ]);
+      const agent = createStelloAgent(
+        baseConfig({ sessions: { getTree } as unknown as SessionTree }),
+      );
+      const forest = await agent.getTopology();
+      expect(forest).toHaveLength(2);
+      expect(forest.map((n) => n.id).sort()).toEqual(['r1', 'r2']);
+    });
+
+    it('getTopologyNode 代理 sessions.getNode', async () => {
+      const getNode = vi.fn().mockResolvedValue({
+        id: 'x', parentId: null, children: [], refs: [], depth: 0, index: 0, label: 'X',
+      });
+      const agent = createStelloAgent(
+        baseConfig({ sessions: { getNode } as unknown as SessionTree }),
+      );
+      const node = await agent.getTopologyNode('x');
+      expect(node?.id).toBe('x');
+    });
+  });
+
+  describe('topologyContextDecorator integration', () => {
+    /**
+     * Build a sessionLoader-style agent fixture where:
+     * - sessions exposes getNode (parent walk) + getTree (subtree)
+     * - the underlying session.send captures the merged sendOptions
+     */
+    function buildTopologyFixture(opts: {
+      sessions: Partial<SessionTree>;
+      topologyContextDecorator?: StelloAgentConfig['topologyContextDecorator'];
+    }) {
+      const captured: { sendOptions?: Record<string, unknown> } = {};
+      const session = {
+        meta: { id: 'child', status: 'active' as const },
+        messages: vi.fn().mockResolvedValue([]),
+        send: vi.fn().mockImplementation(async (_input: string, sendOptions?: Record<string, unknown>) => {
+          captured.sendOptions = sendOptions;
+          return { content: 'done', toolCalls: [] };
+        }),
+        consolidate: vi.fn().mockResolvedValue(undefined),
+        setTools: vi.fn(),
+      };
+
+      const config: StelloAgentConfig = {
+        sessions: {
+          get: vi.fn().mockResolvedValue(rootSession),
+          archive: vi.fn(),
+          ...opts.sessions,
+        } as unknown as SessionTree,
+        session: {
+          sessionLoader: vi.fn().mockResolvedValue({ session, config: null }),
+        },
+        capabilities: {
+          lifecycle: {
+            bootstrap: vi.fn().mockResolvedValue({
+              context: { core: {}, memories: [], currentMemory: null, scope: null },
+              session: rootSession,
+            }),
+            afterTurn: vi.fn(),
+          },
+          tools: {
+            getToolDefinitions: vi.fn().mockReturnValue([]),
+            executeTool: vi.fn().mockResolvedValue({ success: true, data: {} }),
+          },
+          skills: {
+            get: vi.fn().mockReturnValue(undefined),
+            register: vi.fn(),
+            getAll: vi.fn().mockReturnValue([]),
+          } as unknown as SkillRouter,
+          confirm: {} as ConfirmProtocol,
+        },
+      };
+      if (opts.topologyContextDecorator) {
+        config.topologyContextDecorator = opts.topologyContextDecorator;
+      }
+      const agent = createStelloAgent(config);
+      return { agent, captured, session };
     }
 
-    it('createMainSession 返回根拓扑节点（指定 label）', async () => {
-      const sessions = sessionsMock();
-      const agent = createStelloAgent(
-        baseConfig({
-          sessions: {
-            createRoot: sessions.createRoot,
-            putConfig: sessions.putConfig,
-            getConfig: sessions.getConfig,
-          },
-        }),
-      );
+    // 2-node tree: root -> child. getTree returns the recursive SessionTreeNode
+    // structure renderTopologyMarkdown consumes.
+    const twoNodeTree = {
+      getNode: vi.fn().mockImplementation(async (id: string) => {
+        if (id === 'child') {
+          return { id: 'child', parentId: 'root', children: [], refs: [], depth: 1, index: 0, label: 'Child' };
+        }
+        if (id === 'root') {
+          return { id: 'root', parentId: null, children: ['child'], refs: [], depth: 0, index: 0, label: 'Root' };
+        }
+        return null;
+      }),
+      getTree: vi.fn().mockResolvedValue([
+        {
+          id: 'root',
+          label: 'Root',
+          status: 'active' as const,
+          turnCount: 0,
+          children: [
+            { id: 'child', label: 'Child', status: 'active' as const, turnCount: 0, children: [] },
+          ],
+        },
+      ]),
+    };
 
-      const node = await agent.createMainSession({ label: 'Main' });
+    it('applies configured topologyContextDecorator to rendered topology before send', async () => {
+      const { agent, captured } = buildTopologyFixture({
+        sessions: twoNodeTree,
+        topologyContextDecorator: (raw, ctx) => `<space>S:${ctx.sessionId}</space>\n${raw}`,
+      });
 
-      expect(sessions.createRoot).toHaveBeenCalledWith('Main');
-      expect(node.id).toBe('root');
-      expect(node.parentId).toBeNull();
-      expect(node.depth).toBe(0);
-      expect(node.label).toBe('Main');
+      await agent.turn('child', 'hello');
+
+      expect(captured.sendOptions).toBeDefined();
+      const topologyContext = captured.sendOptions?.topologyContext as string | undefined;
+      expect(topologyContext).toBeDefined();
+      expect(topologyContext).toContain('<space>S:child</space>');
+      expect(topologyContext).toContain('<topology>');
+      expect(topologyContext).toContain('</topology>');
+      expect(topologyContext).toContain('← YOU ARE HERE');
+      // root + child both present in the rendered tree
+      expect(topologyContext).toContain('[sessionId=root]');
+      expect(topologyContext).toContain('[sessionId=child]');
     });
 
-    it('createMainSession 无 label 时走 createRoot 默认值', async () => {
-      const sessions = sessionsMock();
-      const agent = createStelloAgent(
-        baseConfig({
-          sessions: {
-            createRoot: sessions.createRoot,
-            putConfig: sessions.putConfig,
-            getConfig: sessions.getConfig,
-          },
-        }),
-      );
-
-      const node = await agent.createMainSession();
-
-      expect(sessions.createRoot).toHaveBeenCalledWith(undefined);
-      expect(node.label).toBe('Root');
-    });
-
-    it('createMainSession 将 mainSessionConfig 的可序列化字段写入 putConfig', async () => {
-      const sessions = sessionsMock();
-      const agent = createStelloAgent({
-        ...baseConfig({
-          sessions: {
-            createRoot: sessions.createRoot,
-            putConfig: sessions.putConfig,
-            getConfig: sessions.getConfig,
-          },
-        }),
-        mainSessionConfig: {
-          systemPrompt: 'P',
-          skills: ['a'],
+    it('falls back to raw topology when topologyContextDecorator throws', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { agent, captured } = buildTopologyFixture({
+        sessions: twoNodeTree,
+        topologyContextDecorator: () => {
+          throw new Error('boom');
         },
       });
 
-      await agent.createMainSession({ label: 'Main' });
+      await agent.turn('child', 'hello');
 
-      expect(sessions.putConfig).toHaveBeenCalledWith('root', {
-        systemPrompt: 'P',
-        skills: ['a'],
-      });
-      expect(await agent.sessions.getConfig('root')).toEqual({
-        systemPrompt: 'P',
-        skills: ['a'],
-      });
+      const topologyContext = captured.sendOptions?.topologyContext as string | undefined;
+      expect(topologyContext).toBeDefined();
+      expect(topologyContext).toContain('<topology>');
+      expect(topologyContext).not.toContain('<space>');
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
     });
 
-    it('createMainSession 剔除非可序列化字段（llm/integrateFn 等）', async () => {
-      const sessions = sessionsMock();
-      const dummyLlm = { complete: vi.fn() } as never;
-      const dummyFn = vi.fn();
-      const agent = createStelloAgent({
-        ...baseConfig({
-          sessions: {
-            createRoot: sessions.createRoot,
-            putConfig: sessions.putConfig,
-            getConfig: sessions.getConfig,
-          },
-        }),
-        mainSessionConfig: {
-          systemPrompt: 'P',
-          llm: dummyLlm,
-          integrateFn: dummyFn,
+    it('omits topologyContext when SessionTree query fails', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { agent, captured } = buildTopologyFixture({
+        sessions: {
+          getNode: vi.fn().mockRejectedValue(new Error('tree gone')),
+          getTree: vi.fn().mockRejectedValue(new Error('tree gone')),
         },
       });
 
-      await agent.createMainSession({ label: 'Main' });
+      await agent.turn('child', 'hello');
 
-      expect(sessions.putConfig).toHaveBeenCalledWith('root', { systemPrompt: 'P' });
-      const stored = sessions.store.get('root') as Record<string, unknown>;
-      expect(stored).not.toHaveProperty('llm');
-      expect(stored).not.toHaveProperty('integrateFn');
+      expect(captured.sendOptions).toBeDefined();
+      expect(captured.sendOptions?.topologyContext).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('orchestrator-facing data-IO SDK', () => {
+    function storageMock() {
+      return {
+        getMemory: vi.fn().mockResolvedValue('mem-x'),
+        putMemory: vi.fn().mockResolvedValue(undefined),
+        getInsight: vi.fn().mockResolvedValue('ins-x'),
+        putInsight: vi.fn().mockResolvedValue(undefined),
+        clearInsight: vi.fn().mockResolvedValue(undefined),
+        listRecords: vi.fn().mockResolvedValue([{ role: 'user', content: 'hi' }]),
+      } as unknown as SessionStorage;
+    }
+
+    it('未注入 storage 时数据 IO 抛错', async () => {
+      const agent = createStelloAgent(baseConfig());
+      await expect(agent.getSessionMetadata('x')).rejects.toThrow(
+        'StelloAgent.getSessionMetadata 需要 StelloAgentConfig.storage',
+      );
     });
 
-    it('createMainSession 无 mainSessionConfig 时写入空对象', async () => {
-      const sessions = sessionsMock();
-      const agent = createStelloAgent(
-        baseConfig({
-          sessions: {
-            createRoot: sessions.createRoot,
-            putConfig: sessions.putConfig,
-            getConfig: sessions.getConfig,
-          },
-        }),
-      );
+    it('getSessionMetadata 聚合 memory + insight', async () => {
+      const storage = storageMock();
+      const agent = createStelloAgent({ ...baseConfig(), storage });
+      expect(await agent.getSessionMetadata('s1')).toEqual({ memory: 'mem-x', insight: 'ins-x' });
+    });
 
-      await agent.createMainSession({ label: 'Main' });
+    it('listSessionDigests 走 sessions.listAll 并对每个 Session 取 memory/insight', async () => {
+      const storage = storageMock();
+      const listAll = vi.fn().mockResolvedValue([
+        { id: 'a', label: 'A', status: 'active', turnCount: 0, createdAt: '', updatedAt: '', lastActiveAt: '' },
+        { id: 'b', label: 'B', status: 'archived', turnCount: 0, createdAt: '', updatedAt: '', lastActiveAt: '' },
+      ]);
+      const agent = createStelloAgent({
+        ...baseConfig({ sessions: { listAll } as unknown as SessionTree }),
+        storage,
+      });
+      const digests = await agent.listSessionDigests({ status: 'active' });
+      expect(digests).toEqual([
+        { id: 'a', label: 'A', status: 'active', memory: 'mem-x', insight: 'ins-x' },
+      ]);
+    });
 
-      expect(sessions.putConfig).toHaveBeenCalledWith('root', {});
+    it('listMessages 代理 storage.listRecords', async () => {
+      const storage = storageMock();
+      const agent = createStelloAgent({ ...baseConfig(), storage });
+      expect(await agent.listMessages('s1', { limit: 10 })).toEqual([
+        { role: 'user', content: 'hi' },
+      ]);
+      expect(storage.listRecords).toHaveBeenCalledWith('s1', { limit: 10 });
+    });
+
+    it('putMemory / putInsight / clearInsight 代理 storage', async () => {
+      const storage = storageMock();
+      const agent = createStelloAgent({ ...baseConfig(), storage });
+      await agent.putMemory('s1', 'M');
+      await agent.putInsight('s1', 'I');
+      await agent.clearInsight('s1');
+      expect(storage.putMemory).toHaveBeenCalledWith('s1', 'M');
+      expect(storage.putInsight).toHaveBeenCalledWith('s1', 'I');
+      expect(storage.clearInsight).toHaveBeenCalledWith('s1');
     });
   });
 });

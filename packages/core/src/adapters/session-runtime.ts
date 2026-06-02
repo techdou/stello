@@ -1,4 +1,4 @@
-import type { ForkContextFn, LLMAdapter, LLMCompleteOptions } from '@stello-ai/session';
+import type { ForkContextFn, LLMAdapter, LLMCompleteOptions, SessionInput } from '@stello-ai/session';
 import type { EngineRuntimeSession } from '../engine/stello-engine';
 import type { ToolCallParser } from '../engine/turn-runner';
 
@@ -24,6 +24,8 @@ export interface SessionCompatibleSendResult {
   };
 }
 
+export type SessionCompatibleInput = string | SessionInput;
+
 /** 结构兼容 @stello-ai/session 的 consolidate 函数签名 */
 export type SessionCompatibleConsolidateFn = (
   currentMemory: string | null,
@@ -34,15 +36,6 @@ export type SessionCompatibleConsolidateFn = (
 export type SessionCompatibleCompressFn = (
   messages: Array<{ role: string; content: string; timestamp?: string }>,
 ) => Promise<string>;
-
-/** 结构兼容 @stello-ai/session 的 integrate 函数签名 */
-export type SessionCompatibleIntegrateFn = (
-  children: Array<{ sessionId: string; label: string; l2: string }>,
-  currentSynthesis: string | null,
-) => Promise<{
-  synthesis: string;
-  insights: Array<{ sessionId: string; content: string }>;
-}>;
 
 /** 结构兼容 @stello-ai/session 的 ForkOptions */
 export interface SessionCompatibleForkOptions {
@@ -63,6 +56,10 @@ export interface SessionCompatibleForkOptions {
 export interface SessionCompatibleSendOptions {
   /** AbortSignal — abort 时底层 LLM 调用应被取消 */
   signal?: AbortSignal;
+  /** Agent 级共享 memory 索引段（已由编排层渲染） */
+  sharedMemoryContext?: string;
+  /** Per-session topology 上下文段（已由编排层渲染） */
+  topologyContext?: string;
 }
 
 /** 结构兼容 @stello-ai/session 的 Session */
@@ -72,11 +69,11 @@ export interface SessionCompatible {
     status: 'active' | 'archived';
   };
   send(
-    content: string,
+    content: SessionCompatibleInput,
     options?: SessionCompatibleSendOptions,
   ): Promise<SessionCompatibleSendResult>;
   stream?(
-    content: string,
+    content: SessionCompatibleInput,
     options?: SessionCompatibleSendOptions,
   ): AsyncIterable<string> & { result: Promise<SessionCompatibleSendResult> };
   messages(): Promise<Array<{ role: string; content: string; timestamp?: string }>>;
@@ -89,17 +86,23 @@ export interface SessionCompatible {
   setTools(tools: LLMCompleteOptions['tools'] | undefined): void;
 }
 
-/** 结构兼容 @stello-ai/session 的 MainSession */
-export interface MainSessionCompatible {
-  integrate(): Promise<unknown>;
-}
-
 /** Session -> EngineRuntime 适配配置 */
 export interface SessionRuntimeAdapterOptions {
   /** 上下文压缩函数（可选） */
   compressFn?: SessionCompatibleCompressFn;
   /** 自定义 send() 结果序列化方式，默认转成 JSON 字符串 */
   serializeResult?: (result: SessionCompatibleSendResult) => string;
+  /**
+   * 每次 send/stream 前调用，返回当前 agent 的共享 memory 全量上下文段。
+   * 返回 undefined / 空字符串则不注入。adapter 把结果合并进 sendOptions.sharedMemoryContext。
+   */
+  sharedMemoryContextProvider?: () => Promise<string | undefined>;
+  /**
+   * Per-session topology context provider, called before each send/stream with
+   * the session's own id. Result is merged into sendOptions.topologyContext.
+   * Returning undefined / empty string omits injection.
+   */
+  topologyContextProvider?: (sessionId: string) => Promise<string | undefined>;
 }
 
 /** 默认的 Session send() 结果序列化 */
@@ -169,8 +172,15 @@ export async function adaptSessionToEngineRuntime(
     get turnCount() {
       return turnCount;
     },
-    async send(input: string, sendOptions?: SessionCompatibleSendOptions): Promise<string> {
-      const result = await session.send(input, sendOptions);
+    async send(input: SessionCompatibleInput, sendOptions?: SessionCompatibleSendOptions): Promise<string> {
+      const sharedMemoryContext = await options.sharedMemoryContextProvider?.();
+      const topologyContext = await options.topologyContextProvider?.(session.meta.id);
+      const mergedOptions: SessionCompatibleSendOptions = {
+        ...sendOptions,
+        ...(sharedMemoryContext ? { sharedMemoryContext } : {}),
+        ...(topologyContext ? { topologyContext } : {}),
+      };
+      const result = await session.send(input, mergedOptions);
       turnCount += 1;
       return (options.serializeResult ?? serializeSessionSendResult)(result);
     },
@@ -185,18 +195,29 @@ export async function adaptSessionToEngineRuntime(
     },
     ...(session.stream
       ? {
-          stream(input: string, sendOptions?: SessionCompatibleSendOptions) {
-            const source = session.stream!(input, sendOptions);
+          stream(input: SessionCompatibleInput, sendOptions?: SessionCompatibleSendOptions) {
+            const contextPromise = options.sharedMemoryContextProvider?.() ?? Promise.resolve(undefined);
+            const topologyPromise = options.topologyContextProvider?.(session.meta.id) ?? Promise.resolve(undefined);
+            const source = (async () => {
+              const sharedMemoryContext = await contextPromise;
+              const topologyContext = await topologyPromise;
+              const mergedOptions: SessionCompatibleSendOptions = {
+                ...sendOptions,
+                ...(sharedMemoryContext ? { sharedMemoryContext } : {}),
+                ...(topologyContext ? { topologyContext } : {}),
+              };
+              return session.stream!(input, mergedOptions);
+            })();
             return {
               result: (async () => {
-                const result = await source.result;
+                const stream = await source;
+                const result = await stream.result;
                 turnCount += 1;
                 return (options.serializeResult ?? serializeSessionSendResult)(result);
               })(),
               async *[Symbol.asyncIterator]() {
-                for await (const chunk of source) {
-                  yield chunk;
-                }
+                const stream = await source;
+                for await (const chunk of stream) yield chunk;
               },
             };
           },
@@ -215,4 +236,3 @@ export async function adaptSessionToEngineRuntime(
       : {}),
   };
 }
-

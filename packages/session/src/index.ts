@@ -1,11 +1,14 @@
 // 类型导出 — Session
 export type { SessionMeta, SessionMetaUpdate, SessionFilter, ForkOptions, ForkContextFn } from './types/session.js'
-export type { SessionStorage, MainStorage, ListRecordsOptions, TopologyNode } from './types/storage.js'
+export type { SessionStorage, ListRecordsOptions, CompressionCacheSnapshot } from './types/storage.js'
 export type {
-  Message, ToolCall, LLMCompleteOptions, LLMResult, LLMChunk, LLMAdapter,
+  Message, ContentPart, TextPart, ImagePart, VideoPart, FilePart, AudioPart, MediaSource,
+  ToolCall, ClientToolDefinition, ProviderToolDefinition, ProviderToolProvider, ProviderToolEvent,
+  LLMCompleteOptions, LLMResult, LLMChunk, LLMAdapter,
 } from './types/llm.js'
 export type {
   Session,
+  SessionInput,
   MessageQueryOptions,
   SessionSendOptions,
 } from './types/session-api.js'
@@ -14,22 +17,12 @@ export {
   NotImplementedError,
 } from './types/session-api.js'
 
-// 类型导出 — MainSession
-export type {
-  MainSession,
-} from './types/main-session-api.js'
-
 // 类型导出 — 函数签名与选项
 export type {
   CompressFn,
   ConsolidateFn,
-  IntegrateFn,
-  IntegrateResult,
-  ChildL2Summary,
   CreateSessionOptions,
   LoadSessionOptions,
-  CreateMainSessionOptions,
-  LoadMainSessionOptions,
   SendResult,
   StreamResult,
 } from './types/functions.js'
@@ -40,9 +33,6 @@ export { tool } from './tool.js'
 
 // Session 工厂函数
 export { createSession, loadSession } from './create-session.js'
-
-// MainSession 工厂函数
-export { createMainSession, loadMainSession } from './create-main-session.js'
 
 // LLM Adapter — 高层工厂（推荐）
 export type { ClaudeModel, ClaudeOptions } from './adapters/claude.js'

@@ -1,5 +1,19 @@
 # @stello-ai/session
 
+## 0.8.0
+
+> **迁移指南**：[`docs/migration-main-session-decouple.md`](../../docs/migration-main-session-decouple.md) 含心智模型转变、删除清单、迁移配方与 orchestrator 重建示例。
+
+### Breaking
+
+- 删除 `MainSession` 接口、`createMainSession` / `loadMainSession` 工厂、`CreateMainSessionOptions` / `LoadMainSessionOptions` 选项
+- 删除 `MainStorage` 接口；其能力或合并入 `SessionStorage`（`listSessions`）或由 core 拓扑层接管（`putNode` 等）；批量 L2 收集（`getAllSessionL2s`）转为 `StelloAgent.listSessionDigests`
+- 删除 `IntegrateFn` / `IntegrateResult` / `ChildL2Summary` 类型
+- `SessionMeta` 删除 `role` / `tags` / `metadata` 三个字段；`SessionFilter.role` / `SessionFilter.tags` 同步删除
+- `ForkOptions` 删除 `tags` / `metadata` 两个字段
+- `assembleMainSessionContext` 函数删除——所有 Session 同构走 `assembleSessionContext`
+- 应用域字段建议通过应用层 wrapper Session 承载；Stello 不再模型化业务字段
+
 ## 0.7.0
 
 ### Added

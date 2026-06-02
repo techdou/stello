@@ -1,10 +1,7 @@
 // ─── 引擎主接口 + 事件 + 策略类型定义 ───
 
 import type { SessionTree } from './session';
-import type {
-  TurnRecord,
-  MemoryEngine,
-} from './memory';
+import type { TurnRecord } from './memory';
 import type {
   BootstrapResult,
   AfterTurnResult,
@@ -16,7 +13,7 @@ import type {
   ConfirmProtocol,
 } from './lifecycle';
 import type { EngineRuntimeSession, EngineStreamResult, EngineTurnResult } from '../engine/stello-engine';
-import type { TurnRunnerOptions } from '../engine/turn-runner';
+import type { TurnInput, TurnRunnerOptions } from '../engine/turn-runner';
 import type { ForkContextFn } from '@stello-ai/session';
 import type { SessionConfig } from './session-config';
 
@@ -76,8 +73,6 @@ export interface StelloEngine {
   readonly sessionId: string;
   /** Session 树操作 */
   readonly sessions: SessionTree;
-  /** 记忆系统 */
-  readonly memory: MemoryEngine;
   /** Skill 路由 */
   readonly skills: SkillRouter;
   /** 确认协议 */
@@ -90,9 +85,9 @@ export interface StelloEngine {
   /** 离开当前绑定 Session 的整轮对话 */
   leaveSession(): Promise<{ sessionId: string }>;
   /** 流式处理当前绑定 Session 的一轮对话 */
-  stream(input: string, options?: TurnRunnerOptions): EngineStreamResult;
+  stream(input: TurnInput, options?: TurnRunnerOptions): EngineStreamResult;
   /** 非流式处理当前绑定 Session 的一轮对话 */
-  turn?(input: string, options?: TurnRunnerOptions): Promise<EngineTurnResult>;
+  turn?(input: TurnInput, options?: TurnRunnerOptions): Promise<EngineTurnResult>;
   /** 导出 Agent Tool 定义（兼容 OpenAI / Claude tool use） */
   getToolDefinitions(): ToolDefinition[];
   /** 执行 Agent Tool */

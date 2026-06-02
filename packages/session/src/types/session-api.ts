@@ -1,5 +1,5 @@
 import type { SessionMeta, SessionMetaUpdate, ForkOptions } from './session.js'
-import type { Message, LLMAdapter, LLMCompleteOptions } from './llm.js'
+import type { ContentPart, Message, LLMAdapter, LLMCompleteOptions } from './llm.js'
 import type { SendResult, StreamResult } from './functions.js'
 
 
@@ -19,6 +19,22 @@ export interface MessageQueryOptions {
 export interface SessionSendOptions {
   /** AbortSignal — abort 后中断 LLM 调用并 reject 为 AbortError */
   signal?: AbortSignal
+  /**
+   * Agent 级共享 memory 全量内容段（已由编排层渲染好）。
+   * 非空时插入到 systemPrompt 之后、topology/identity 之前；为空 / undefined 时不注入。
+   */
+  sharedMemoryContext?: string
+  /**
+   * Agent 级 topology 上下文段（已由编排层渲染好，含 you-are-here 标记和可选 decorator 前缀）。
+   * 非空时插入到 sharedMemoryContext 之后、session_identity 之前；为空 / undefined 时不注入。
+   */
+  topologyContext?: string
+}
+
+/** Session.send / Session.stream 的对象输入。text 是持久文本投影，parts 是当前 turn 的多模态源数据。 */
+export interface SessionInput {
+  text: string
+  parts?: ContentPart[]
 }
 
 /** Session 错误：操作归档中的 Session */
@@ -46,10 +62,10 @@ export interface Session {
   readonly meta: Readonly<SessionMeta>
 
   /** 发送一条消息：组装上下文 → 调 LLM → 存 L3（用户消息 + LLM 响应）→ 返回结果 */
-  send(content: string, options?: SessionSendOptions): Promise<SendResult>
+  send(input: string | SessionInput, options?: SessionSendOptions): Promise<SendResult>
 
   /** 流式发送：同 send() 但逐 chunk 输出，流结束后自动存 L3 */
-  stream(content: string, options?: SessionSendOptions): StreamResult
+  stream(input: string | SessionInput, options?: SessionSendOptions): StreamResult
 
   /** 读取 L3 对话记录 */
   messages(options?: MessageQueryOptions): Promise<Message[]>

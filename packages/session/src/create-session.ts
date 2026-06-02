@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import type { Session, MessageQueryOptions, SessionSendOptions } from './types/session-api.js'
+import type { Session, MessageQueryOptions, SessionInput, SessionSendOptions } from './types/session-api.js'
 import { SessionArchivedError } from './types/session-api.js'
 import type { SessionMeta, SessionMetaUpdate, ForkOptions } from './types/session.js'
 import type { Message } from './types/llm.js'
 import type { CreateSessionOptions, LoadSessionOptions, SendResult, StreamResult } from './types/functions.js'
-import { assembleSessionContext, buildSessionIdentityMessages, createBuiltinCompressFn, removeIncompleteToolCallGroups, type CompressionCache } from './context-utils.js'
+import { assembleSessionContext, buildSessionIdentityMessages, createBuiltinCompressFn, flushCompressionCache, hydrateCompressionCache, removeIncompleteToolCallGroups, type CompressionCache } from './context-utils.js'
 
 interface ToolResultEnvelope {
   toolResults: Array<{
@@ -37,6 +37,26 @@ function parseToolResultEnvelope(content: string): ToolResultEnvelope | null {
   }
 }
 
+function attachTurnMetadata(records: Message[], turnId: string): Message[] {
+  let seq = 0
+  return records.map((record) => ({
+    ...record,
+    metadata: {
+      ...(record.metadata ?? {}),
+      turnId,
+      turnSeq: seq++,
+    },
+  }))
+}
+
+function normalizeSessionInput(input: string | SessionInput): { text: string; parts?: Message['parts'] } {
+  if (typeof input === 'string') return { text: input }
+  return {
+    text: input.text,
+    ...(input.parts && input.parts.length > 0 ? { parts: input.parts } : {}),
+  }
+}
+
 /** 把 tool 执行结果序列化为 tool message content，对齐 OpenAI/Anthropic 标准（只含结果数据）。 */
 function serializeToolResultContent(result: ToolResultEnvelope['toolResults'][number]): string {
   if (!result.success) {
@@ -47,11 +67,22 @@ function serializeToolResultContent(result: ToolResultEnvelope['toolResults'][nu
   return JSON.stringify(result.data)
 }
 
+function stripMultimodalParts(records: Message[]): Message[] {
+  return records.map((record) => {
+    if (!record.parts) return record
+    const { parts, ...rest } = record
+    void parts
+    return rest
+  })
+}
+
 /** 为 toolResults continuation 组装固定上下文与历史。 */
 async function assembleSessionReplayContext(
   sessionId: string,
   storage: CreateSessionOptions['storage'] | LoadSessionOptions['storage'],
   label?: string,
+  sharedMemoryContext?: string,
+  topologyContext?: string,
 ): Promise<{ messages: Message[]; insightConsumed: boolean }> {
   const messages: Message[] = []
   let insightConsumed = false
@@ -59,6 +90,14 @@ async function assembleSessionReplayContext(
   const sysPrompt = await storage.getSystemPrompt(sessionId)
   if (sysPrompt) {
     messages.push({ role: 'system', content: sysPrompt })
+  }
+
+  if (sharedMemoryContext) {
+    messages.push({ role: 'system', content: sharedMemoryContext })
+  }
+
+  if (topologyContext) {
+    messages.push({ role: 'system', content: topologyContext })
   }
 
   messages.push(...buildSessionIdentityMessages(label))
@@ -77,7 +116,7 @@ async function assembleSessionReplayContext(
   // 注意：此处刻意不调用 removeIncompleteToolCallGroups。
   // replay 路径会把"assistant(toolCalls) + 由 envelope 合成的 tool 消息"拼接成完整组，
   // 在加载阶段过早裁剪反而会把回灌目标删掉。完整组校验放在拼接后由调用方做。
-  const history = await storage.listRecords(sessionId)
+  const history = stripMultimodalParts(await storage.listRecords(sessionId))
   messages.push(...history)
   return { messages, insightConsumed }
 }
@@ -137,9 +176,44 @@ function buildSession(
   let tools = options.tools
   let lastPromptTokens: number | null = null
   let compressionCache: CompressionCache | null = null
+  // 从 storage 后端加载持久化压缩缓存(若支持);fire-and-forget。
+  // 若 hydrate 在首次 compress 之前到达,缓存命中,跳过一次 compress 调用。
+  // helper 内部已 console.warn 错误,此处永不抛错。
+  //
+  // 边界:如果 hydrate Promise 完成前发生 "compress → reset" 序列
+  //(compressionCache 被显式置 null),迟到的 hydrate 会按此 guard 把
+  // stale snapshot 重新装入。在实践中该窗口极窄(hydrate 是亚秒级 DB 读,
+  // reset 通常是用户动作),且会被下一次 compress 自然纠正。
+  void hydrateCompressionCache(storage, currentMeta.id).then((cache) => {
+    if (cache && !compressionCache) compressionCache = cache
+  })
   /** 解析 compressFn：用户提供 > 内置 LLM 压缩 */
   function resolveCompressFn() {
     return options.compressFn ?? createBuiltinCompressFn(options.llm!)
+  }
+
+  /**
+   * 在一次 turn 结束后同步内存压缩缓存,并在确实有新压缩快照产生时把它
+   * 持久化到 storage(fire-and-forget;失败由 helper 内部 warn 记录)。
+   *
+   * 行为:
+   * - assembledCache === undefined:本轮 compress 未运行,直接返回。
+   * - assembledCache 为真值且与当前内存引用不同:产生了新压缩快照,flush。
+   * - assembledCache 为真值且与当前内存引用相同:compressWithFn 在缓存命中
+   *   时会返回同一引用,跳过 flush,避免重复写入。
+   *
+   * TODO: AssembleResult.compressionCache 类型包含 `| null`,但
+   * compressWithFn 实际不会返回 null。可在独立清理中收紧该类型,使下方
+   * truthy 检查变得多余。
+   */
+  function persistAndApplyCompressionCache(
+    assembledCache: CompressionCache | null | undefined,
+  ): void {
+    if (assembledCache === undefined) return
+    if (assembledCache && assembledCache !== compressionCache) {
+      flushCompressionCache(storage, currentMeta.id, assembledCache)
+    }
+    compressionCache = assembledCache
   }
 
   const session: Session = {
@@ -147,7 +221,7 @@ function buildSession(
       return currentMeta
     },
 
-    async send(content: string, sendOptions?: SessionSendOptions): Promise<SendResult> {
+    async send(input: string | SessionInput, sendOptions?: SessionSendOptions): Promise<SendResult> {
       if (currentMeta.status === 'archived') {
         throw new SessionArchivedError(currentMeta.id)
       }
@@ -156,16 +230,19 @@ function buildSession(
       }
       // pre-flight：已 abort 的 signal 立即抛出，不发起任何 LLM 请求
       sendOptions?.signal?.throwIfAborted()
+      const normalizedInput = normalizeSessionInput(input)
+      const content = normalizedInput.text
 
       // 组装上下文（自动压缩）
       const assembled = await assembleSessionContext(
         currentMeta.id, storage, content,
         { maxContextTokens: options.llm.maxContextTokens, lastPromptTokens, compressFn: resolveCompressFn(), compressionCache },
         currentMeta.label,
+        sendOptions?.sharedMemoryContext,
+        sendOptions?.topologyContext,
+        normalizedInput.parts,
       )
-      if (assembled.compressionCache !== undefined) {
-        compressionCache = assembled.compressionCache
-      }
+      persistAndApplyCompressionCache(assembled.compressionCache)
 
       // 消费 insight
       if (assembled.insightConsumed) {
@@ -173,10 +250,15 @@ function buildSession(
       }
 
       let promptMessages = assembled.messages
-      let recordsToPersist: Message[] = [{ role: 'user', content, timestamp: assembled.userTimestamp }]
+      let recordsToPersist: Message[] = [{
+        role: 'user',
+        content,
+        timestamp: assembled.userTimestamp,
+        ...(normalizedInput.parts ? { parts: normalizedInput.parts } : {}),
+      }]
       const toolEnvelope = parseToolResultEnvelope(content)
       if (toolEnvelope) {
-        const replayContext = await assembleSessionReplayContext(currentMeta.id, storage, currentMeta.label)
+        const replayContext = await assembleSessionReplayContext(currentMeta.id, storage, currentMeta.label, sendOptions?.sharedMemoryContext, sendOptions?.topologyContext)
         promptMessages = [
           ...replayContext.messages,
           ...toolEnvelope.toolResults.map((result) => ({
@@ -205,22 +287,24 @@ function buildSession(
       const assistantRecord: Message = {
         role: 'assistant',
         content: result.content ?? '',
+        ...(result.reasoningContent ? { reasoningContent: result.reasoningContent } : {}),
         ...(result.toolCalls && result.toolCalls.length > 0 ? { toolCalls: result.toolCalls } : {}),
         timestamp: new Date().toISOString(),
       }
-      for (const record of recordsToPersist) {
+      const turnId = randomUUID()
+      for (const record of attachTurnMetadata([...recordsToPersist, assistantRecord], turnId)) {
         await storage.appendRecord(currentMeta.id, record)
       }
-      await storage.appendRecord(currentMeta.id, assistantRecord)
 
       return {
         content: result.content,
+        reasoningContent: result.reasoningContent,
         toolCalls: result.toolCalls,
         usage: result.usage,
       }
     },
 
-    stream(content: string, sendOptions?: SessionSendOptions): StreamResult {
+    stream(input: string | SessionInput, sendOptions?: SessionSendOptions): StreamResult {
       if (currentMeta.status === 'archived') {
         throw new SessionArchivedError(currentMeta.id)
       }
@@ -231,16 +315,19 @@ function buildSession(
       return createStreamResult(async (push) => {
         // pre-flight：已 abort 的 signal 立即让 result reject，processor 不进入下游
         sendOptions?.signal?.throwIfAborted()
+        const normalizedInput = normalizeSessionInput(input)
+        const content = normalizedInput.text
 
         // 组装上下文（自动压缩）
         const assembled = await assembleSessionContext(
           currentMeta.id, storage, content,
           { maxContextTokens: options.llm!.maxContextTokens, lastPromptTokens, compressFn: resolveCompressFn(), compressionCache },
           currentMeta.label,
+          sendOptions?.sharedMemoryContext,
+          sendOptions?.topologyContext,
+          normalizedInput.parts,
         )
-        if (assembled.compressionCache !== undefined) {
-          compressionCache = assembled.compressionCache
-        }
+        persistAndApplyCompressionCache(assembled.compressionCache)
 
         // 消费 insight
         if (assembled.insightConsumed) {
@@ -248,10 +335,15 @@ function buildSession(
         }
 
         let promptMessages = assembled.messages
-        let recordsToPersist: Message[] = [{ role: 'user', content, timestamp: assembled.userTimestamp }]
+        let recordsToPersist: Message[] = [{
+          role: 'user',
+          content,
+          timestamp: assembled.userTimestamp,
+          ...(normalizedInput.parts ? { parts: normalizedInput.parts } : {}),
+        }]
         const toolEnvelope = parseToolResultEnvelope(content)
         if (toolEnvelope) {
-          const replayContext = await assembleSessionReplayContext(currentMeta.id, storage, currentMeta.label)
+          const replayContext = await assembleSessionReplayContext(currentMeta.id, storage, currentMeta.label, sendOptions?.sharedMemoryContext, sendOptions?.topologyContext)
           promptMessages = [
             ...replayContext.messages,
             ...toolEnvelope.toolResults.map((result) => ({
@@ -276,11 +368,13 @@ function buildSession(
         let result: SendResult
         if (options.llm.stream) {
           let accumulated = ''
+          let accumulatedReasoning = ''
           const toolCallsByIndex = new Map<number, { id?: string; name?: string; input: string }>()
           // adapter 在 abort 时抛 AbortError，这里直接向上传播给 result promise；
           // 下方 L3 写入分支不会执行（policy: drop entirely），与非流式 send() 对称。
           for await (const chunk of options.llm.stream(promptMessages, { tools, signal: sendOptions?.signal })) {
             accumulated += chunk.delta
+            if (chunk.reasoningDelta) accumulatedReasoning += chunk.reasoningDelta
             push(chunk.delta)
             for (const delta of chunk.toolCallDeltas ?? []) {
               const current = toolCallsByIndex.get(delta.index) ?? { input: '' }
@@ -295,7 +389,11 @@ function buildSession(
             name: call.name ?? 'unknown_tool',
             input: call.input ? JSON.parse(call.input) as Record<string, unknown> : {},
           }))
-          result = { content: accumulated, toolCalls }
+          result = {
+            content: accumulated,
+            ...(accumulatedReasoning ? { reasoningContent: accumulatedReasoning } : {}),
+            toolCalls,
+          }
         } else {
           result = await options.llm.complete(promptMessages, { tools, signal: sendOptions?.signal })
           if (result.content) {
@@ -306,13 +404,14 @@ function buildSession(
         const assistantRecord: Message = {
           role: 'assistant',
           content: result.content ?? '',
+          ...(result.reasoningContent ? { reasoningContent: result.reasoningContent } : {}),
           ...(result.toolCalls && result.toolCalls.length > 0 ? { toolCalls: result.toolCalls } : {}),
           timestamp: new Date().toISOString(),
         }
-        for (const record of recordsToPersist) {
+        const turnId = randomUUID()
+        for (const record of attachTurnMetadata([...recordsToPersist, assistantRecord], turnId)) {
           await storage.appendRecord(currentMeta.id, record)
         }
-        await storage.appendRecord(currentMeta.id, assistantRecord)
 
         // 更新 promptTokens 基线
         if (result.usage?.promptTokens) {
@@ -321,6 +420,7 @@ function buildSession(
 
         return {
           content: result.content,
+          reasoningContent: result.reasoningContent,
           toolCalls: result.toolCalls,
           usage: result.usage,
         }
@@ -387,10 +487,7 @@ function buildSession(
       const childMeta: SessionMeta = {
         id: childId,
         label: forkOptions.label,
-        role: 'standard',
         status: 'active',
-        tags: forkOptions.tags ?? [],
-        metadata: forkOptions.metadata ?? {},
         createdAt: now,
         updatedAt: now,
       }
@@ -442,8 +539,6 @@ function buildSession(
       const updatedMeta: SessionMeta = {
         ...currentMeta,
         ...(updates.label !== undefined && { label: updates.label }),
-        ...(updates.tags !== undefined && { tags: updates.tags }),
-        ...(updates.metadata !== undefined && { metadata: updates.metadata }),
         updatedAt: new Date().toISOString(),
       }
       await storage.putSession(updatedMeta)
@@ -484,10 +579,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Sess
   const meta: SessionMeta = {
     id,
     label: options.label ?? 'New Session',
-    role: 'standard',
     status: 'active',
-    tags: options.tags ?? [],
-    metadata: options.metadata ?? {},
     createdAt: now,
     updatedAt: now,
   }

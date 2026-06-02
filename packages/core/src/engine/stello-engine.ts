@@ -1,6 +1,5 @@
 import type { SessionTree } from '../types/session';
-import { MAIN_SESSION_ID } from '../types/session';
-import type { MemoryEngine, TurnRecord } from '../types/memory';
+import type { TurnRecord } from '../types/memory';
 import type { LLMCompleteOptions } from '@stello-ai/session';
 import type {
   BootstrapResult,
@@ -34,7 +33,13 @@ import {
   type TurnRunnerOptions,
   type TurnRunnerResult,
   type TurnRunnerStreamResult,
+  type TurnInput,
 } from './turn-runner';
+
+
+function turnInputText(input: TurnInput): string {
+  return typeof input === 'string' ? input : input.text;
+}
 
 /** Engine 调用 session.send/stream 时的运行时选项 */
 export interface EngineRuntimeSessionCallOptions {
@@ -55,10 +60,10 @@ export interface EngineRuntimeSession {
   /** 当前已完成轮次 */
   turnCount: number;
   /** 运行一次单条对话 */
-  send(input: string, options?: EngineRuntimeSessionCallOptions): Promise<string>;
+  send(input: TurnInput, options?: EngineRuntimeSessionCallOptions): Promise<string>;
   /** 可选：流式运行一次单条对话 */
   stream?(
-    input: string,
+    input: TurnInput,
     options?: EngineRuntimeSessionCallOptions,
   ): AsyncIterable<string> & { result: Promise<string> };
   /** fork 子 session，返回子 session 的 runtime */
@@ -95,7 +100,6 @@ export interface EngineToolRuntime {
 export interface StelloEngineOptions {
   session: EngineRuntimeSession;
   sessions: SessionTree;
-  memory: MemoryEngine;
   skills: SkillRouter;
   confirm: ConfirmProtocol;
   lifecycle: EngineLifecycleAdapter;
@@ -163,7 +167,6 @@ export interface EngineHooks {
  */
 export class StelloEngineImpl implements StelloEngine {
   readonly sessions: SessionTree;
-  readonly memory: MemoryEngine;
   readonly skills: SkillRouter;
   readonly confirm: ConfirmProtocol;
 
@@ -181,7 +184,6 @@ export class StelloEngineImpl implements StelloEngine {
   constructor(options: StelloEngineOptions) {
     this.session = options.session;
     this.sessions = options.sessions;
-    this.memory = options.memory;
     this.skills = options.skills;
     this.confirm = options.confirm;
     this.lifecycle = options.lifecycle;
@@ -220,9 +222,10 @@ export class StelloEngineImpl implements StelloEngine {
   }
 
   /** 处理一轮编排：当前 session send + tool loop + 调度 */
-  async turn(input: string, options?: TurnRunnerOptions): Promise<EngineTurnResult> {
-    this.fireHook('onMessageReceived', { sessionId: this.session.id, input });
-    this.fireHook('onRoundStart', { sessionId: this.session.id, input });
+  async turn(input: TurnInput, options?: TurnRunnerOptions): Promise<EngineTurnResult> {
+    const inputText = turnInputText(input);
+    this.fireHook('onMessageReceived', { sessionId: this.session.id, input: inputText });
+    this.fireHook('onRoundStart', { sessionId: this.session.id, input: inputText });
     let turn: TurnRunnerResult;
     try {
       turn = await this.turnRunner.run(this.session, input, this, {
@@ -242,20 +245,21 @@ export class StelloEngineImpl implements StelloEngine {
     }
     this.fireHook('onAssistantReply', {
       sessionId: this.session.id,
-      input,
+      input: inputText,
       content: turn.finalContent,
       rawResponse: turn.rawResponse,
     });
     this.fireHook('onRoundEnd', {
       sessionId: this.session.id,
-      input,
+      input: inputText,
       turn,
     });
     return { turn };
   }
 
   /** 流式处理一轮编排：先输出增量文本，完成后再返回完整 turn */
-  stream(input: string, options?: TurnRunnerOptions): EngineStreamResult {
+  stream(input: TurnInput, options?: TurnRunnerOptions): EngineStreamResult {
+    const inputText = turnInputText(input);
     const source: TurnRunnerStreamResult = this.turnRunner.runStream(this.session, input, this, {
       ...options,
       onToolCall: (toolCall) => {
@@ -269,8 +273,8 @@ export class StelloEngineImpl implements StelloEngine {
     });
 
     const result = (async () => {
-      this.fireHook('onMessageReceived', { sessionId: this.session.id, input });
-      this.fireHook('onRoundStart', { sessionId: this.session.id, input });
+      this.fireHook('onMessageReceived', { sessionId: this.session.id, input: inputText });
+      this.fireHook('onRoundStart', { sessionId: this.session.id, input: inputText });
 
       let turn: TurnRunnerResult;
       try {
@@ -282,13 +286,13 @@ export class StelloEngineImpl implements StelloEngine {
 
       this.fireHook('onAssistantReply', {
         sessionId: this.session.id,
-        input,
+        input: inputText,
         content: turn.finalContent,
         rawResponse: turn.rawResponse,
       });
       this.fireHook('onRoundEnd', {
         sessionId: this.session.id,
-        input,
+        input: inputText,
         turn,
       });
       return { turn };
@@ -358,12 +362,8 @@ export class StelloEngineImpl implements StelloEngine {
       throw new Error('Fork 不可用：当前 session runtime 未实现 fork()');
     }
 
-    // 从 main session fork 时不继承 main 的配置（invariant #6）：
-    // main 的 SerializableMainSessionConfig 与 regular 的 SerializableSessionConfig 共用
-    // 同一存储槽，需在读之前判断 source 角色、跳过读取。
-    const parentFrozen = sourceSessionId === MAIN_SESSION_ID
-      ? null
-      : await this.sessions.getConfig(sourceSessionId);
+    // 读取 source session 固化配置；不存在则使用空对象作为继承基线。
+    const parentFrozen = await this.sessions.getConfig(sourceSessionId);
     const parent: SessionConfig = parentFrozen ?? {};
 
     // 合成最终配置：defaults → parent → profile → forkOptions
@@ -375,7 +375,7 @@ export class StelloEngineImpl implements StelloEngine {
       forkOptions: options,
     });
 
-    // 解析有效 context 并按需执行压缩。必须在 createChild 之前运行：
+    // 解析有效 context 并按需执行压缩。必须在 createSession 之前运行：
     // 若 compress 缺少 compressFn/llm 而抛错，避免产生孤儿拓扑节点。
     const effectiveContext = options.context ?? profile?.context;
     const llmCallFn: LLMCallFn | undefined = merged.llm
@@ -385,13 +385,14 @@ export class StelloEngineImpl implements StelloEngine {
       await applyCompressContext({
         context: effectiveContext,
         systemPrompt: merged.systemPrompt,
+        forkCompressFn: merged.forkCompressFn,
         compressFn: merged.compressFn,
         llmCallFn,
         sourceMessages: () => this.session.messages(),
       });
 
     // Topology-first：创建拓扑节点，获取 ID（sourceSessionId 作为一等字段持久化）
-    const child = await this.sessions.createChild({
+    const child = await this.sessions.createSession({
       parentId: topologyParentId,
       label: options.label,
       sourceSessionId,

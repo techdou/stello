@@ -3,66 +3,11 @@ import type { LLMAdapter } from '@stello-ai/session'
 import {
   createDefaultCompressFn,
   createDefaultConsolidateFn,
-  createDefaultIntegrateFn,
   DEFAULT_COMPRESS_PROMPT,
   DEFAULT_CONSOLIDATE_PROMPT,
-  DEFAULT_INTEGRATE_PROMPT,
   llmCallFnFromAdapter,
   type LLMCallFn,
 } from '../defaults.js'
-
-describe('createDefaultIntegrateFn', () => {
-  it('在传给 LLM 的子 Session 摘要中包含真实 sessionId', async () => {
-    const llm = vi.fn<LLMCallFn>(async () => JSON.stringify({
-      synthesis: '综合结果',
-      insights: [{ sessionId: 'sess-1', content: '继续推进' }],
-    }))
-    const fn = createDefaultIntegrateFn(DEFAULT_INTEGRATE_PROMPT, llm)
-
-    await fn([
-      { sessionId: 'sess-1', label: '选校', l2: '已完成第一轮筛选' },
-      { sessionId: 'sess-2', label: '文书', l2: 'PS 初稿待修改' },
-    ], null)
-
-    expect(llm).toHaveBeenCalledTimes(1)
-    const [messages] = llm.mock.calls[0]!
-    expect(messages[1]?.content).toContain('[sessionId=sess-1] 选校: 已完成第一轮筛选')
-    expect(messages[1]?.content).toContain('[sessionId=sess-2] 文书: PS 初稿待修改')
-  })
-
-  it('无 roleContext 时不额外注入 system 消息（向后兼容）', async () => {
-    const llm = vi.fn<LLMCallFn>(async () => JSON.stringify({ synthesis: '', insights: [] }))
-    const fn = createDefaultIntegrateFn(DEFAULT_INTEGRATE_PROMPT, llm)
-    await fn([{ sessionId: 's1', label: 'x', l2: 'y' }], null)
-    const [messages] = llm.mock.calls[0]!
-    expect(messages).toHaveLength(2)
-    expect(messages[0]?.role).toBe('system')
-    expect(messages[1]?.role).toBe('user')
-  })
-
-  it('传入 roleContext 时在任务 prompt 后插入 <role_context> system 消息', async () => {
-    const llm = vi.fn<LLMCallFn>(async () => JSON.stringify({ synthesis: '', insights: [] }))
-    const fn = createDefaultIntegrateFn(DEFAULT_INTEGRATE_PROMPT, llm, {
-      roleContext: '你是 MainSession 的协调者',
-    })
-    await fn([{ sessionId: 's1', label: 'x', l2: 'y' }], null)
-    const [messages] = llm.mock.calls[0]!
-    expect(messages).toHaveLength(3)
-    expect(messages[0]?.role).toBe('system')
-    expect(messages[0]?.content).toBe(DEFAULT_INTEGRATE_PROMPT)
-    expect(messages[1]?.role).toBe('system')
-    expect(messages[1]?.content).toBe('<role_context>\n你是 MainSession 的协调者\n</role_context>')
-    expect(messages[2]?.role).toBe('user')
-  })
-
-  it('roleContext 为空字符串时视为未传（不注入）', async () => {
-    const llm = vi.fn<LLMCallFn>(async () => JSON.stringify({ synthesis: '', insights: [] }))
-    const fn = createDefaultIntegrateFn(DEFAULT_INTEGRATE_PROMPT, llm, { roleContext: '' })
-    await fn([{ sessionId: 's1', label: 'x', l2: 'y' }], null)
-    const [messages] = llm.mock.calls[0]!
-    expect(messages).toHaveLength(2)
-  })
-})
 
 describe('createDefaultConsolidateFn', () => {
   it('无 roleContext 时消息结构为 [system:prompt, user:content]', async () => {
@@ -126,6 +71,56 @@ describe('createDefaultCompressFn', () => {
     expect(messages).toHaveLength(2)
   })
 })
+
+describe('label option in DefaultFnOptions', () => {
+  it('prepends [session: {label}] to compress user prompt when label set', async () => {
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'summary'; };
+    const fn = createDefaultCompressFn('PROMPT', llm, { label: 'Alpha' });
+    await fn([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }]);
+    const userMsg = captured.find(m => m.role === 'user')!;
+    expect(userMsg.content.startsWith('[session: Alpha]\n\n')).toBe(true);
+    expect(userMsg.content).toContain('对话记录:');
+  });
+
+  it('omits prefix when label undefined', async () => {
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'summary'; };
+    const fn = createDefaultCompressFn('PROMPT', llm);
+    await fn([{ role: 'user', content: 'hi' }]);
+    const userMsg = captured.find(m => m.role === 'user')!;
+    expect(userMsg.content.startsWith('[session:')).toBe(false);
+  });
+
+  it('prepends [session: {label}] to consolidate user prompt before "当前摘要"', async () => {
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'new memory'; };
+    const fn = createDefaultConsolidateFn('PROMPT', llm, { label: 'Beta' });
+    await fn('old memory', [{ role: 'user', content: 'x' }]);
+    const userMsg = captured.find(m => m.role === 'user')!;
+    expect(userMsg.content.startsWith('[session: Beta]\n\n当前摘要:')).toBe(true);
+  });
+
+  it('omits prefix in consolidate when label undefined', async () => {
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'new'; };
+    const fn = createDefaultConsolidateFn('PROMPT', llm);
+    await fn(null, [{ role: 'user', content: 'x' }]);
+    const userMsg = captured.find(m => m.role === 'user')!;
+    expect(userMsg.content.startsWith('[session:')).toBe(false);
+  });
+
+  it('coexists with roleContext (both injected)', async () => {
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 's'; };
+    const fn = createDefaultCompressFn('PROMPT', llm, { label: 'L', roleContext: 'RC' });
+    await fn([{ role: 'user', content: 'x' }]);
+    const systemContents = captured.filter(m => m.role === 'system').map(m => m.content);
+    expect(systemContents.some(c => c.includes('<role_context>\nRC\n</role_context>'))).toBe(true);
+    const userMsg = captured.find(m => m.role === 'user')!;
+    expect(userMsg.content.startsWith('[session: L]')).toBe(true);
+  });
+});
 
 describe('llmCallFnFromAdapter', () => {
   it('forwards messages to adapter.complete and returns content', async () => {

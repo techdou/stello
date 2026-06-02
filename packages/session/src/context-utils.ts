@@ -1,5 +1,5 @@
 import type { Message, LLMAdapter } from './types/llm.js'
-import type { SessionStorage } from './types/storage.js'
+import type { SessionStorage, CompressionCacheSnapshot } from './types/storage.js'
 import type { CompressFn } from './types/functions.js'
 
 /**
@@ -43,6 +43,15 @@ export function removeIncompleteToolCallGroups(records: Message[]): Message[] {
     i++
   }
   return result
+}
+
+function stripMultimodalParts(messages: Message[]): Message[] {
+  return messages.map((message) => {
+    if (!message.parts) return message
+    const { parts, ...rest } = message
+    void parts
+    return rest
+  })
 }
 
 /** 内置默认压缩提示词 */
@@ -168,6 +177,10 @@ export function buildSessionIdentityMessages(label: string | undefined): Message
  *
  * 若传入 `label`（非空）则在 systemPrompt 之后插入 `<session_identity>` 系统消息，
  * 让子 session 感知自己的身份标签。
+ *
+ * 注入顺序：systemPrompt → sharedMemoryContext → topologyContext → session_identity → insight → history → user。
+ * sharedMemoryContext / topologyContext 由编排层渲染好后通过 SessionSendOptions 传入；
+ * 为空 / undefined 时对应槽位不注入。
  */
 export async function assembleSessionContext(
   sessionId: string,
@@ -175,6 +188,9 @@ export async function assembleSessionContext(
   userContent: string,
   compress: CompressContext,
   label?: string,
+  sharedMemoryContext?: string,
+  topologyContext?: string,
+  userParts?: Message['parts'],
 ): Promise<AssembleResult> {
   const prefixMessages: Message[] = []
   let insightConsumed = false
@@ -185,10 +201,20 @@ export async function assembleSessionContext(
     prefixMessages.push({ role: 'system', content: sysPrompt })
   }
 
-  // 2. session identity (label)
+  // 2. shared memory full context (agent-level)
+  if (sharedMemoryContext) {
+    prefixMessages.push({ role: 'system', content: sharedMemoryContext })
+  }
+
+  // 3. topology context (agent-level, externally rendered with you-are-here marker)
+  if (topologyContext) {
+    prefixMessages.push({ role: 'system', content: topologyContext })
+  }
+
+  // 4. session identity (label)
   prefixMessages.push(...buildSessionIdentityMessages(label))
 
-  // 3. insight
+  // 5. insight
   const insightContent = await storage.getInsight(sessionId)
   if (insightContent) {
     prefixMessages.push({ role: 'system', content: insightContent })
@@ -196,10 +222,15 @@ export async function assembleSessionContext(
   }
 
   const userTimestamp = new Date().toISOString()
-  const userMessage: Message = { role: 'user', content: userContent, timestamp: userTimestamp }
+  const userMessage: Message = {
+    role: 'user',
+    content: userContent,
+    timestamp: userTimestamp,
+    ...(userParts && userParts.length > 0 ? { parts: userParts } : {}),
+  }
 
   // 净化历史：移除中断/崩溃残留的不完整 tool call 组，保证送给 LLM 的 prompt 协议合法
-  const history = removeIncompleteToolCallGroups(await storage.listRecords(sessionId))
+  const history = stripMultimodalParts(removeIncompleteToolCallGroups(await storage.listRecords(sessionId)))
 
   // 估算全量 token 数
   const fullMessages = [...prefixMessages, ...history, userMessage]
@@ -283,87 +314,43 @@ async function compressWithFn(
 }
 
 /**
- * 组装 MainSession 上下文，支持自动压缩
+ * 从 storage 读取已持久化的压缩缓存(若实现该方法)。
  *
- * MainSession 始终注入 synthesis。超阈值时调用 compressFn 压缩 + 近期 L3。
+ * 返回 null 的情形:
+ * - storage 未实现 getCompressionCache(可选方法)
+ * - storage 返回 null(无快照)
+ * - 读取抛错(错误通过 console.warn 记录,调用方回退到内存行为)
  */
-export async function assembleMainSessionContext(
-  sessionId: string,
+export async function hydrateCompressionCache(
   storage: SessionStorage,
-  userContent: string,
-  compress: CompressContext,
-): Promise<{ messages: Message[]; userTimestamp: string; compressed: boolean; compressionCache?: CompressionCache | null }> {
-  const prefixMessages: Message[] = []
-
-  // 1. system prompt
-  const sysPrompt = await storage.getSystemPrompt(sessionId)
-  if (sysPrompt) {
-    prefixMessages.push({ role: 'system', content: sysPrompt })
+  sessionId: string,
+): Promise<CompressionCache | null> {
+  if (typeof storage.getCompressionCache !== 'function') return null
+  try {
+    const snap = await storage.getCompressionCache(sessionId)
+    if (!snap) return null
+    return { summary: snap.summary, compressedCount: snap.compressedCount }
+  } catch (err) {
+    console.warn('[stello/session] hydrateCompressionCache failed', { sessionId, err })
+    return null
   }
+}
 
-  // 2. synthesis（始终注入）
-  const synthContent = await storage.getMemory(sessionId)
-  if (synthContent) {
-    prefixMessages.push({ role: 'system', content: synthContent })
-  }
-
-  const userTimestamp = new Date().toISOString()
-  const userMessage: Message = { role: 'user', content: userContent, timestamp: userTimestamp }
-
-  // 净化历史：与 assembleSessionContext 对称，避免不完整 tool call 组流入 prompt
-  const history = removeIncompleteToolCallGroups(await storage.listRecords(sessionId))
-
-  // 估算全量 token 数
-  const fullMessages = [...prefixMessages, ...history, userMessage]
-  const estimatedTokens = compress.lastPromptTokens !== null
-    ? compress.lastPromptTokens + estimateTokens([...history.slice(-2), userMessage])
-    : estimateTokens(fullMessages)
-
-  const threshold = compress.maxContextTokens * COMPRESS_THRESHOLD
-
-  // 未超阈值 → 全量
-  if (estimatedTokens < threshold) {
-    return { messages: fullMessages, userTimestamp, compressed: false }
-  }
-
-  // 超阈值 → 调用 compressFn 压缩
-  const fixedTokens = estimateTokens([...prefixMessages, userMessage])
-  const cachedSummary = compress.compressionCache?.summary
-  const summaryEstimate = cachedSummary
-    ? Math.ceil(cachedSummary.length / 4)
-    : ESTIMATED_SUMMARY_TOKENS
-  const recentBudget = threshold - fixedTokens - summaryEstimate
-  const recentMessages = recentBudget > 0
-    ? selectHistoryByBudget(history, recentBudget)
-    : []
-
-  const compressCount = history.length - recentMessages.length
-
-  if (compressCount === 0) {
-    return { messages: fullMessages, userTimestamp, compressed: false }
-  }
-
-  let summary: string
-  let newCache: CompressionCache
-  if (compress.compressionCache && compress.compressionCache.compressedCount === compressCount) {
-    summary = compress.compressionCache.summary
-    newCache = compress.compressionCache
-  } else {
-    summary = await compress.compressFn(history.slice(0, compressCount))
-    newCache = { summary, compressedCount: compressCount }
-  }
-
-  const summaryMessage: Message = { role: 'system', content: summary }
-  const actualFixedTokens = estimateTokens([...prefixMessages, summaryMessage, userMessage])
-  const actualBudget = threshold - actualFixedTokens
-  const finalRecent = actualBudget > 0
-    ? selectHistoryByBudget(history, actualBudget)
-    : []
-
-  return {
-    messages: [...prefixMessages, summaryMessage, ...finalRecent, userMessage],
-    userTimestamp,
-    compressed: true,
-    compressionCache: newCache,
-  }
+/**
+ * 把压缩缓存快照写入 storage(若实现该方法)。fire-and-forget:
+ * 调用立即返回,持久化在后台异步进行。失败会通过 console.warn 记录,
+ * 但永远不会阻塞 LLM 轮次,也不会抛错。
+ * 未实现 putCompressionCache 的 storage 后端,本函数等效 no-op。
+ */
+export function flushCompressionCache(
+  storage: SessionStorage,
+  sessionId: string,
+  snapshot: CompressionCacheSnapshot,
+): void {
+  if (typeof storage.putCompressionCache !== 'function') return
+  // Fire-and-forget: persistence latency must not block the calling LLM turn.
+  // Errors are warned but never thrown.
+  void storage.putCompressionCache(sessionId, snapshot).catch((err) => {
+    console.warn('[stello/session] flushCompressionCache failed', { sessionId, err })
+  })
 }

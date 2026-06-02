@@ -1,5 +1,5 @@
 /** Stello SDK 版本号 */
-export const VERSION = '0.5.2';
+export const VERSION = '0.10.0';
 
 // 导出所有类型定义
 export type {
@@ -10,13 +10,6 @@ export type {
   SessionTreeNode,
   CreateSessionOptions,
   SessionTree,
-  // 记忆系统
-  InheritancePolicy,
-  CoreSchemaField,
-  CoreSchema,
-  TurnRecord,
-  AssembledContext,
-  MemoryEngine,
   // 文件系统适配器
   FileSystemAdapter,
   // 生命周期钩子
@@ -42,20 +35,17 @@ export type {
   SessionRuntimeResolver,
   // Session 统一配置类型
   SessionConfig,
-  MainSessionConfig,
   SerializableSessionConfig,
-  SerializableMainSessionConfig,
 } from './types';
 
 export type { ToolExecutionContext } from './types/tool';
-
-// 导出常量
-export { MAIN_SESSION_ID } from './types/session';
+// Re-export internal types that appear in public interfaces (BootstrapResult,
+// StelloEngine) so consumers can type their lifecycle implementations.
+export type { TurnRecord, AssembledContext } from './types/memory';
 
 // 导出实现
 export { NodeFileSystemAdapter } from './fs';
 export { SessionTreeImpl } from './session';
-export { FileSystemMemoryEngine } from './memory/file-system-memory-engine';
 export { SplitGuard } from './session/split-guard';
 export type { SplitCheckResult } from './session/split-guard';
 export { SkillRouterImpl } from './skill/skill-router';
@@ -70,11 +60,9 @@ export {
 export type {
   SessionRuntimeAdapterOptions,
   SessionCompatible,
-  MainSessionCompatible,
   SessionCompatibleToolCall,
   SessionCompatibleSendResult,
   SessionCompatibleConsolidateFn,
-  SessionCompatibleIntegrateFn,
   SessionCompatibleCompressFn,
   SessionCompatibleForkOptions,
 } from './adapters/session-runtime';
@@ -82,6 +70,7 @@ export { ForkProfileRegistryImpl } from './engine/fork-profile';
 export type { ForkProfile, ForkProfileRegistry } from './engine/fork-profile';
 export { ToolRegistryImpl, buildSessionToolList } from './tool/tool-registry';
 export type { ToolRegistry, ToolRegistryEntry } from './tool/tool-registry';
+export { renderTopologyMarkdown } from './engine/topology-render';
 export { TurnRunner } from './engine/turn-runner';
 export type {
   ToolCall,
@@ -128,25 +117,34 @@ export type {
   StelloAgentCapabilitiesConfig,
   StelloAgentRuntimeConfig,
   StelloAgentOrchestrationConfig,
+  SessionMetadataView,
+  SessionDigest,
 } from './agent/stello-agent';
 
-// 内置 tool 工厂（builtin-tools redesign）
-export { createSessionTool, activateSkillTool } from './builtin-tools';
+// 共享 memory
+export { InMemorySharedMemoryStore } from './shared-memory/in-memory-shared-memory-store';
+export { renderSharedMemoryContext } from './shared-memory/render-shared-memory';
+export type { SharedMemoryEntry, SharedMemoryStore } from './shared-memory/types';
+
+// 内置 tool 工厂
+export {
+  createSessionTool,
+  activateSkillTool,
+  memoryEditTool,
+} from './builtin-tools';
 
 // 导出 LLM 默认实现
 export {
   createDefaultConsolidateFn,
-  createDefaultIntegrateFn,
   createDefaultCompressFn,
   DEFAULT_CONSOLIDATE_PROMPT,
-  DEFAULT_INTEGRATE_PROMPT,
   DEFAULT_COMPRESS_PROMPT,
+  DEFAULT_FORK_COMPRESS_PROMPT,
 } from './llm/defaults';
 export type { LLMCallFn, DefaultFnOptions } from './llm/defaults';
 
 // Re-export @stello-ai/session 常用接口，core 用户无需额外 import session 包
 export { createSession, loadSession } from '@stello-ai/session';
-export { createMainSession, loadMainSession } from '@stello-ai/session';
 export { createClaude } from '@stello-ai/session';
 export { createGPT } from '@stello-ai/session';
 export { createOpenAICompatibleAdapter } from '@stello-ai/session';
@@ -159,23 +157,24 @@ export { SessionArchivedError, NotImplementedError } from '@stello-ai/session';
 export type {
   // LLM 适配器
   LLMAdapter, LLMResult, LLMChunk, LLMCompleteOptions, Message,
+  ClientToolDefinition, ProviderToolDefinition, ProviderToolProvider, ProviderToolEvent,
   ClaudeModel, ClaudeOptions,
   GPTModel, GPTOptions,
   OpenAICompatibleOptions,
   AnthropicAdapterOptions,
   // Session API
-  Session, MainSession, SendResult, StreamResult,
+  Session, SendResult, StreamResult,
   MessageQueryOptions,
   // Session 元数据
   SessionMetaUpdate, SessionFilter,
   // Fork
   ForkOptions, ForkContextFn,
   // 存储
-  SessionStorage, MainStorage, ListRecordsOptions,
+  SessionStorage, ListRecordsOptions,
   // 函数签名
-  CompressFn, ConsolidateFn, IntegrateFn, IntegrateResult, ChildL2Summary,
+  CompressFn, ConsolidateFn,
   CreateSessionOptions as SessionCreateOptions,
-  LoadSessionOptions, CreateMainSessionOptions, LoadMainSessionOptions,
+  LoadSessionOptions,
   // 工具
   Tool, CallToolResult, ToolAnnotations,
 } from '@stello-ai/session';

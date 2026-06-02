@@ -7,7 +7,6 @@ import type {
   SessionTree,
   CreateSessionOptions,
 } from '../types/session';
-import { MAIN_SESSION_ID } from '../types/session';
 import type { SerializableSessionConfig } from '../types/session-config';
 
 /**
@@ -88,15 +87,15 @@ function toTopologyNode(stored: StoredMeta): TopologyNode {
 /**
  * SessionTree 的默认实现
  *
- * 管理对话的树状空间结构，用 FileSystemAdapter 做持久化。
+ * 管理对话的树状空间结构（森林），用 FileSystemAdapter 做持久化。
  * 内部以 StoredMeta 统一存储，对外按 SessionMeta / TopologyNode 分离返回。
  */
 export class SessionTreeImpl implements SessionTree {
   /**
-   * 串行化父节点 RMW 的写锁。createChild / addRef 都需要先读父节点的 children/refs
-   * 数组、追加新元素、再整体写回；并发执行（如同一轮内多个 stello_create_session
-   * 工具调用）会因 last-write-wins 丢失先到的修改。这里用一条 Promise 链强制单线
-   * 执行。fork/ref 不是吞吐路径，串行代价可忽略。
+   * 串行化父节点 RMW 的写锁。createSession（带 parentId） / addRef 都需要先读父节点
+   * 的 children/refs 数组、追加新元素、再整体写回；并发执行（如同一轮内多个
+   * stello_create_session 工具调用）会因 last-write-wins 丢失先到的修改。这里用一
+   * 条 Promise 链强制单线执行。fork/ref 不是吞吐路径，串行代价可忽略。
    */
   private writeLock: Promise<unknown> = Promise.resolve();
 
@@ -110,54 +109,52 @@ export class SessionTreeImpl implements SessionTree {
   }
 
   /**
-   * 创建根 Session（main），初始化配套 .md 与 core.json
+   * 创建 Session 拓扑节点。
    *
-   * 幂等：若 `MAIN_SESSION_ID` 对应的 meta 已存在，直接返回现有 TopologyNode，不覆写任何数据。
+   * - `options.parentId` 为空：创建新 root（`parentId === null`，`depth === 0`），
+   *   多 root 合法；同时初始化 core.json（如果尚未存在）
+   * - 非空：挂在该节点下作为子节点，更新父的 children 列表
+   * - 始终初始化 memory.md / scope.md / index.md
    */
-  async createRoot(label = 'Root'): Promise<TopologyNode> {
-    const existing = await this.fs.readJSON<StoredMeta>(metaPath(MAIN_SESSION_ID));
-    if (existing !== null) {
-      return toTopologyNode(existing);
-    }
-    const ts = now();
-    const stored: StoredMeta = {
-      id: MAIN_SESSION_ID,
-      parentId: null,
-      children: [],
-      refs: [],
-      label,
-      index: 0,
-      status: 'active',
-      depth: 0,
-      turnCount: 0,
-      createdAt: ts,
-      updatedAt: ts,
-      lastActiveAt: ts,
-    };
-    await this.fs.writeJSON(metaPath(stored.id), stored);
-    // 初始化三个 .md 内容文件
-    await this.fs.writeFile(`sessions/${stored.id}/memory.md`, '');
-    await this.fs.writeFile(`sessions/${stored.id}/scope.md`, '');
-    await this.fs.writeFile(`sessions/${stored.id}/index.md`, '');
-    // 初始化 core.json（如果不存在）
-    const coreExisting = await this.fs.readJSON('core.json');
-    if (coreExisting === null) {
-      await this.fs.writeJSON('core.json', {});
-    }
-    return toTopologyNode(stored);
-  }
-
-  /** 创建子 Session，写入 meta.json 并更新父节点 children 列表 */
-  async createChild(options: CreateSessionOptions): Promise<TopologyNode> {
+  async createSession(options: CreateSessionOptions = {}): Promise<TopologyNode> {
     return this.withWriteLock(async () => {
-      const parent = await this.requireStored(options.parentId);
       const ts = now();
+      const id = randomUUID();
+
+      if (!options.parentId) {
+        const stored: StoredMeta = {
+          id,
+          parentId: null,
+          children: [],
+          refs: [],
+          label: options.label ?? 'Root',
+          index: 0,
+          status: 'active',
+          depth: 0,
+          turnCount: 0,
+          createdAt: ts,
+          updatedAt: ts,
+          lastActiveAt: ts,
+        };
+        if (options.sourceSessionId !== undefined) {
+          stored.sourceSessionId = options.sourceSessionId;
+        }
+        await this.fs.writeJSON(metaPath(id), stored);
+        await this.initSessionFiles(id);
+        const coreExisting = await this.fs.readJSON('core.json');
+        if (coreExisting === null) {
+          await this.fs.writeJSON('core.json', {});
+        }
+        return toTopologyNode(stored);
+      }
+
+      const parent = await this.requireStored(options.parentId);
       const stored: StoredMeta = {
-        id: randomUUID(),
+        id,
         parentId: parent.id,
         children: [],
         refs: [],
-        label: options.label,
+        label: options.label ?? 'Session',
         index: parent.children.length,
         status: 'active',
         depth: parent.depth + 1,
@@ -169,18 +166,20 @@ export class SessionTreeImpl implements SessionTree {
       if (options.sourceSessionId !== undefined) {
         stored.sourceSessionId = options.sourceSessionId;
       }
-      // 写子 Session meta.json
-      await this.fs.writeJSON(metaPath(stored.id), stored);
-      // 初始化三个 .md 内容文件
-      await this.fs.writeFile(`sessions/${stored.id}/memory.md`, '');
-      await this.fs.writeFile(`sessions/${stored.id}/scope.md`, '');
-      await this.fs.writeFile(`sessions/${stored.id}/index.md`, '');
-      // 更新父的 children 列表
-      parent.children.push(stored.id);
+      await this.fs.writeJSON(metaPath(id), stored);
+      await this.initSessionFiles(id);
+      parent.children.push(id);
       parent.updatedAt = now();
       await this.fs.writeJSON(metaPath(parent.id), parent);
       return toTopologyNode(stored);
     });
+  }
+
+  /** 初始化 Session 的三个 .md 内容文件 */
+  private async initSessionFiles(id: string): Promise<void> {
+    await this.fs.writeFile(`sessions/${id}/memory.md`, '');
+    await this.fs.writeFile(`sessions/${id}/scope.md`, '');
+    await this.fs.writeFile(`sessions/${id}/index.md`, '');
   }
 
   async get(id: string): Promise<SessionMeta | null> {
@@ -188,16 +187,15 @@ export class SessionTreeImpl implements SessionTree {
     return stored ? toSessionMeta(stored) : null;
   }
 
-  async getRoot(): Promise<SessionMeta> {
-    const all = await this.listAllStored();
-    const root = all.find((s) => s.parentId === null);
-    if (!root) throw new Error('根 Session 不存在');
-    return toSessionMeta(root);
-  }
-
   async listAll(): Promise<SessionMeta[]> {
     const all = await this.listAllStored();
     return all.map(toSessionMeta);
+  }
+
+  /** 列出所有 root（parentId === null） */
+  async listRoots(): Promise<TopologyNode[]> {
+    const all = await this.listAllStored();
+    return all.filter((s) => s.parentId === null).map(toTopologyNode);
   }
 
   async archive(id: string): Promise<void> {
@@ -248,11 +246,14 @@ export class SessionTreeImpl implements SessionTree {
     return stored ? toTopologyNode(stored) : null;
   }
 
-  async getTree(): Promise<SessionTreeNode> {
+  /**
+   * 返回拓扑森林（多 root 数组）。
+   * 没有任何 root 时返回空数组。
+   */
+  async getTree(): Promise<SessionTreeNode[]> {
     const all = await this.listAllStored();
     const map = new Map(all.map((s) => [s.id, s]));
-    const root = all.find((s) => s.parentId === null);
-    if (!root) throw new Error('根 Session 不存在');
+    const roots = all.filter((s) => s.parentId === null);
 
     // 递归构建树节点，sourceSessionId 走统一解析（兼容 legacy metadata）
     const buildNode = (stored: StoredMeta): SessionTreeNode => {
@@ -271,7 +272,7 @@ export class SessionTreeImpl implements SessionTree {
       return node;
     };
 
-    return buildNode(root);
+    return roots.map(buildNode);
   }
 
   async getAncestors(id: string): Promise<TopologyNode[]> {

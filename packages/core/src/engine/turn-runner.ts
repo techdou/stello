@@ -1,4 +1,7 @@
+import type { SessionInput } from '@stello-ai/session';
 import type { ToolExecutionResult } from '../types/lifecycle';
+
+export type TurnInput = string | SessionInput;
 
 /**
  * 在单轮内并行执行所有 tool call，按输入顺序整理结果并按序触发事件。
@@ -90,10 +93,10 @@ export interface TurnRunnerSession {
   /** Session 标识 */
   id: string;
   /** 执行一次单条对话 */
-  send(input: string, options?: TurnRunnerSessionCallOptions): Promise<string>;
+  send(input: TurnInput, options?: TurnRunnerSessionCallOptions): Promise<string>;
   /** 可选：流式执行一次单条对话 */
   stream?(
-    input: string,
+    input: TurnInput,
     options?: TurnRunnerSessionCallOptions,
   ): AsyncIterable<string> & { result: Promise<string> };
 }
@@ -185,12 +188,12 @@ export class TurnRunner {
    */
   async run(
     session: TurnRunnerSession,
-    input: string,
+    input: TurnInput,
     tools: TurnRunnerToolExecutor,
     options: TurnRunnerOptions = {},
   ): Promise<TurnRunnerResult> {
     const maxToolRounds = options.maxToolRounds ?? 5;
-    let currentInput = input;
+    let currentInput: TurnInput = input;
     let toolRoundCount = 0;
     let toolCallsExecuted = 0;
     let lastRawResponse = '';
@@ -231,7 +234,7 @@ export class TurnRunner {
    */
   runStream(
     session: TurnRunnerSession,
-    input: string,
+    input: TurnInput,
     tools: TurnRunnerToolExecutor,
     options: TurnRunnerOptions = {},
   ): TurnRunnerStreamResult {
