@@ -70,7 +70,8 @@ function serializeToolResultContent(result: ToolResultEnvelope['toolResults'][nu
 function stripMultimodalParts(records: Message[]): Message[] {
   return records.map((record) => {
     if (!record.parts) return record
-    const { parts: _parts, ...rest } = record
+    const { parts, ...rest } = record
+    void parts
     return rest
   })
 }

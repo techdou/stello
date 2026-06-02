@@ -74,8 +74,8 @@ describe('createDefaultCompressFn', () => {
 
 describe('label option in DefaultFnOptions', () => {
   it('prepends [session: {label}] to compress user prompt when label set', async () => {
-    let captured: any[] = [];
-    const llm = async (msgs: any[]) => { captured = msgs; return 'summary'; };
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'summary'; };
     const fn = createDefaultCompressFn('PROMPT', llm, { label: 'Alpha' });
     await fn([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }]);
     const userMsg = captured.find(m => m.role === 'user');
@@ -84,8 +84,8 @@ describe('label option in DefaultFnOptions', () => {
   });
 
   it('omits prefix when label undefined', async () => {
-    let captured: any[] = [];
-    const llm = async (msgs: any[]) => { captured = msgs; return 'summary'; };
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'summary'; };
     const fn = createDefaultCompressFn('PROMPT', llm);
     await fn([{ role: 'user', content: 'hi' }]);
     const userMsg = captured.find(m => m.role === 'user');
@@ -93,8 +93,8 @@ describe('label option in DefaultFnOptions', () => {
   });
 
   it('prepends [session: {label}] to consolidate user prompt before "当前摘要"', async () => {
-    let captured: any[] = [];
-    const llm = async (msgs: any[]) => { captured = msgs; return 'new memory'; };
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'new memory'; };
     const fn = createDefaultConsolidateFn('PROMPT', llm, { label: 'Beta' });
     await fn('old memory', [{ role: 'user', content: 'x' }]);
     const userMsg = captured.find(m => m.role === 'user');
@@ -102,8 +102,8 @@ describe('label option in DefaultFnOptions', () => {
   });
 
   it('omits prefix in consolidate when label undefined', async () => {
-    let captured: any[] = [];
-    const llm = async (msgs: any[]) => { captured = msgs; return 'new'; };
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'new'; };
     const fn = createDefaultConsolidateFn('PROMPT', llm);
     await fn(null, [{ role: 'user', content: 'x' }]);
     const userMsg = captured.find(m => m.role === 'user');
@@ -111,8 +111,8 @@ describe('label option in DefaultFnOptions', () => {
   });
 
   it('coexists with roleContext (both injected)', async () => {
-    let captured: any[] = [];
-    const llm = async (msgs: any[]) => { captured = msgs; return 's'; };
+    let captured: Parameters<LLMCallFn>[0] = [];
+    const llm: LLMCallFn = async (msgs) => { captured = msgs; return 's'; };
     const fn = createDefaultCompressFn('PROMPT', llm, { label: 'L', roleContext: 'RC' });
     await fn([{ role: 'user', content: 'x' }]);
     const systemContents = captured.filter(m => m.role === 'system').map(m => m.content);

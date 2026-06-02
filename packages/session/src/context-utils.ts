@@ -48,7 +48,8 @@ export function removeIncompleteToolCallGroups(records: Message[]): Message[] {
 function stripMultimodalParts(messages: Message[]): Message[] {
   return messages.map((message) => {
     if (!message.parts) return message
-    const { parts: _parts, ...rest } = message
+    const { parts, ...rest } = message
+    void parts
     return rest
   })
 }

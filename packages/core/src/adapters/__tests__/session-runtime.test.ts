@@ -264,7 +264,8 @@ describe('session-runtime adapters', () => {
         topologyContextProvider: provider,
       });
       const stream = runtime.stream!('hi');
-      for await (const _ of stream) {
+      for await (const chunk of stream) {
+        void chunk;
         // drain
       }
       await stream.result;
