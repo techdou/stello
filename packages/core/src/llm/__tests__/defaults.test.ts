@@ -78,7 +78,7 @@ describe('label option in DefaultFnOptions', () => {
     const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'summary'; };
     const fn = createDefaultCompressFn('PROMPT', llm, { label: 'Alpha' });
     await fn([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }]);
-    const userMsg = captured.find(m => m.role === 'user');
+    const userMsg = captured.find(m => m.role === 'user')!;
     expect(userMsg.content.startsWith('[session: Alpha]\n\n')).toBe(true);
     expect(userMsg.content).toContain('对话记录:');
   });
@@ -88,7 +88,7 @@ describe('label option in DefaultFnOptions', () => {
     const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'summary'; };
     const fn = createDefaultCompressFn('PROMPT', llm);
     await fn([{ role: 'user', content: 'hi' }]);
-    const userMsg = captured.find(m => m.role === 'user');
+    const userMsg = captured.find(m => m.role === 'user')!;
     expect(userMsg.content.startsWith('[session:')).toBe(false);
   });
 
@@ -97,7 +97,7 @@ describe('label option in DefaultFnOptions', () => {
     const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'new memory'; };
     const fn = createDefaultConsolidateFn('PROMPT', llm, { label: 'Beta' });
     await fn('old memory', [{ role: 'user', content: 'x' }]);
-    const userMsg = captured.find(m => m.role === 'user');
+    const userMsg = captured.find(m => m.role === 'user')!;
     expect(userMsg.content.startsWith('[session: Beta]\n\n当前摘要:')).toBe(true);
   });
 
@@ -106,7 +106,7 @@ describe('label option in DefaultFnOptions', () => {
     const llm: LLMCallFn = async (msgs) => { captured = msgs; return 'new'; };
     const fn = createDefaultConsolidateFn('PROMPT', llm);
     await fn(null, [{ role: 'user', content: 'x' }]);
-    const userMsg = captured.find(m => m.role === 'user');
+    const userMsg = captured.find(m => m.role === 'user')!;
     expect(userMsg.content.startsWith('[session:')).toBe(false);
   });
 
@@ -117,7 +117,7 @@ describe('label option in DefaultFnOptions', () => {
     await fn([{ role: 'user', content: 'x' }]);
     const systemContents = captured.filter(m => m.role === 'system').map(m => m.content);
     expect(systemContents.some(c => c.includes('<role_context>\nRC\n</role_context>'))).toBe(true);
-    const userMsg = captured.find(m => m.role === 'user');
+    const userMsg = captured.find(m => m.role === 'user')!;
     expect(userMsg.content.startsWith('[session: L]')).toBe(true);
   });
 });
