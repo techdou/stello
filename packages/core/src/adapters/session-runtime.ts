@@ -128,11 +128,13 @@ export const sessionSendResultParser: ToolCallParser = {
         name: string;
         args: Record<string, unknown>;
       }>;
+      usage?: SessionCompatibleSendResult['usage'];
     };
 
     return {
       content: parsed.content,
       toolCalls: parsed.toolCalls ?? [],
+      usage: parsed.usage,
     };
   },
 };
