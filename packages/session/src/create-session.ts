@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Session, MessageQueryOptions, SessionInput, SessionSendOptions } from './types/session-api.js'
 import { SessionArchivedError } from './types/session-api.js'
 import type { SessionMeta, SessionMetaUpdate, ForkOptions } from './types/session.js'
-import type { Message } from './types/llm.js'
+import type { LLMUsage, Message } from './types/llm.js'
 import type { CreateSessionOptions, LoadSessionOptions, SendResult, StreamResult } from './types/functions.js'
 import { assembleSessionContext, buildSessionIdentityMessages, createBuiltinCompressFn, flushCompressionCache, hydrateCompressionCache, removeIncompleteToolCallGroups, type CompressionCache } from './context-utils.js'
 
@@ -74,6 +74,14 @@ function stripMultimodalParts(records: Message[]): Message[] {
     void parts
     return rest
   })
+}
+
+function mergeUsage(current: LLMUsage | undefined, next: LLMUsage | undefined): LLMUsage | undefined {
+  if (!next) return current
+  return {
+    promptTokens: next.promptTokens ?? current?.promptTokens ?? 0,
+    completionTokens: next.completionTokens ?? current?.completionTokens ?? 0,
+  }
 }
 
 /** 为 toolResults continuation 组装固定上下文与历史。 */
@@ -369,12 +377,14 @@ function buildSession(
         if (options.llm.stream) {
           let accumulated = ''
           let accumulatedReasoning = ''
+          let usage: LLMUsage | undefined
           const toolCallsByIndex = new Map<number, { id?: string; name?: string; input: string }>()
           // adapter 在 abort 时抛 AbortError，这里直接向上传播给 result promise；
           // 下方 L3 写入分支不会执行（policy: drop entirely），与非流式 send() 对称。
           for await (const chunk of options.llm.stream(promptMessages, { tools, signal: sendOptions?.signal })) {
             accumulated += chunk.delta
             if (chunk.reasoningDelta) accumulatedReasoning += chunk.reasoningDelta
+            usage = mergeUsage(usage, chunk.usage)
             push(chunk.delta)
             for (const delta of chunk.toolCallDeltas ?? []) {
               const current = toolCallsByIndex.get(delta.index) ?? { input: '' }
@@ -393,6 +403,7 @@ function buildSession(
             content: accumulated,
             ...(accumulatedReasoning ? { reasoningContent: accumulatedReasoning } : {}),
             toolCalls,
+            ...(usage ? { usage } : {}),
           }
         } else {
           result = await options.llm.complete(promptMessages, { tools, signal: sendOptions?.signal })

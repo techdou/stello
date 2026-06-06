@@ -139,6 +139,11 @@ export interface LLMResult {
   }
 }
 
+export interface LLMUsage {
+  promptTokens: number
+  completionTokens: number
+}
+
 /** 流式输出的单个 chunk */
 export interface LLMChunk {
   /** 文本增量片段 */
@@ -154,6 +159,8 @@ export interface LLMChunk {
   }>
   /** Provider 内置 tool 事件 / 结果，不进入客户端 tool loop。 */
   providerToolEvents?: ProviderToolEvent[]
+  /** token 用量统计；通常由 provider 在流结束前后的 usage-only chunk 返回。 */
+  usage?: LLMUsage
 }
 
 /**

@@ -270,6 +270,33 @@ describe('send() 契约', () => {
     expect(messages).toHaveLength(2)
     expect(messages[1]!.content).toBe('你好，世界')
   })
+
+  it('stream() 汇总 adapter chunk usage 并透传到最终结果', async () => {
+    const { session } = await makeSession({
+      llm: {
+        maxContextTokens: 1_000_000,
+        async complete() {
+          return { content: 'unused' }
+        },
+        async *stream() {
+          yield { delta: '你', usage: { promptTokens: 11, completionTokens: 0 } }
+          yield { delta: '好' }
+          yield { delta: '', usage: { promptTokens: 11, completionTokens: 2 } }
+        },
+      },
+    })
+
+    const stream = session.stream('hello')
+    const chunks: string[] = []
+    for await (const chunk of stream) {
+      chunks.push(chunk)
+    }
+    const result = await stream.result
+
+    expect(chunks).toEqual(['你', '好'])
+    expect(result.content).toBe('你好')
+    expect(result.usage).toEqual({ promptTokens: 11, completionTokens: 2 })
+  })
 })
 
 describe('Session.setTools (per-session tool list mutation)', () => {

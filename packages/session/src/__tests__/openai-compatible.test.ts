@@ -347,6 +347,39 @@ describe('createOpenAICompatibleAdapter', () => {
     expect(chunks.map((chunk) => chunk.delta).join('')).toBe('上海中心大厦')
   })
 
+  it('stream() 请求 provider usage 并透传 usage-only chunk', async () => {
+    createCompletion.mockResolvedValueOnce((async function* () {
+      yield { choices: [{ delta: { content: 'ok' } }] }
+      yield { choices: [], usage: { prompt_tokens: 10, completion_tokens: 2 } }
+    })())
+
+    const adapter = createOpenAICompatibleAdapter({
+      apiKey: 'test-key',
+      baseURL: 'https://api.example.com/v1',
+      model: 'test-model',
+      maxContextTokens: 128_000,
+    })
+
+    if (!adapter.stream) throw new Error('adapter.stream is required')
+
+    const chunks = []
+    for await (const chunk of adapter.stream([{ role: 'user', content: 'hello' }])) {
+      chunks.push(chunk)
+    }
+
+    expect(createCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stream: true,
+        stream_options: { include_usage: true },
+      }),
+      undefined,
+    )
+    expect(chunks).toEqual([
+      { delta: 'ok' },
+      { delta: '', usage: { promptTokens: 10, completionTokens: 2 } },
+    ])
+  })
+
   it('StepFun 3.7 多模态能力不绑定固定 baseURL', async () => {
     const adapter = createOpenAICompatibleAdapter({
       apiKey: 'test-key',

@@ -11,6 +11,7 @@ import type {
   LLMAdapter,
   LLMResult,
   LLMChunk,
+  LLMUsage,
   Message,
   ToolCall,
   LLMCompleteOptions,
@@ -26,6 +27,11 @@ type AnthropicProviderBlock = {
   input?: unknown
   content?: unknown
 } & Record<string, unknown>
+
+type AnthropicStreamUsage = {
+  input_tokens?: number | null
+  output_tokens?: number | null
+}
 
 /** Anthropic 原生协议的配置选项 */
 export interface AnthropicAdapterOptions {
@@ -113,6 +119,14 @@ function toAnthropicMessages(messages: Message[]): MessageParam[] {
   }
 
   return result
+}
+
+function mergeAnthropicUsage(current: LLMUsage | undefined, usage: AnthropicStreamUsage | undefined): LLMUsage | undefined {
+  if (!usage) return current
+  return {
+    promptTokens: usage.input_tokens ?? current?.promptTokens ?? 0,
+    completionTokens: usage.output_tokens ?? current?.completionTokens ?? 0,
+  }
 }
 
 /** 将 Stello tools schema 转换为 Anthropic Tool 格式 */
@@ -252,6 +266,7 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): LLMAda
         completeOptions?.signal ? { signal: completeOptions.signal } : undefined,
       )
 
+      let usage: LLMUsage | undefined
       for await (const event of stream) {
         if (event.type === 'content_block_start') {
           // tool_use 块的 id 和 name 只在 start 事件里下发，
@@ -285,6 +300,12 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): LLMAda
               }],
             }
           }
+        } else if (event.type === 'message_start') {
+          usage = mergeAnthropicUsage(usage, event.message.usage)
+          if (usage) yield { delta: '', usage }
+        } else if (event.type === 'message_delta') {
+          usage = mergeAnthropicUsage(usage, event.usage)
+          if (usage) yield { delta: '', usage }
         }
       }
     },

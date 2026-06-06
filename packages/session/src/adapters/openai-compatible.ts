@@ -92,6 +92,15 @@ function isProviderToolCall(call: RawOpenAIToolCall): boolean {
   return typeof call.type === 'string' && call.type !== 'function'
 }
 
+function toProviderUsage(usage: ChatCompletion['usage'] | ChatCompletionChunk['usage'] | undefined) {
+  return usage
+    ? {
+        promptTokens: usage.prompt_tokens,
+        completionTokens: usage.completion_tokens,
+      }
+    : undefined
+}
+
 function toProviderToolEvent(call: RawOpenAIToolCall): ProviderToolEvent {
   const event: ProviderToolEvent = {
     ...(call.id ? { id: call.id } : {}),
@@ -268,12 +277,7 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
           }]
         }),
         ...(providerToolEvents.length > 0 ? { providerToolEvents } : {}),
-        usage: response.usage
-          ? {
-              promptTokens: response.usage.prompt_tokens,
-              completionTokens: response.usage.completion_tokens,
-          }
-          : undefined,
+        usage: toProviderUsage(response.usage),
       }
     },
     async *stream(messages: Message[], completeOptions?: LLMCompleteOptions) {
@@ -282,6 +286,7 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
           ...(await buildParams(messages, completeOptions)),
           ...(options.extraBody ?? {}),
           stream: true,
+          stream_options: { include_usage: true },
         } as Parameters<typeof client.chat.completions.create>[0],
         completeOptions?.signal ? { signal: completeOptions.signal } : undefined,
       ) as Stream<ChatCompletionChunk>
@@ -297,18 +302,20 @@ export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions):
         const providerToolEvents = rawToolCalls
           .filter(isProviderToolCall)
           .map(toProviderToolEvent)
+        const usage = toProviderUsage(chunk.usage)
         const toolCallDeltas = rawToolCalls.filter((call) => !isProviderToolCall(call)).map((call) => ({
           index: call.index ?? 0,
           id: call.id,
           name: call.function?.name,
           input: call.function?.arguments,
         }))
-        if (delta || reasoningDelta || toolCallDeltas.length > 0 || providerToolEvents.length > 0) {
+        if (delta || reasoningDelta || toolCallDeltas.length > 0 || providerToolEvents.length > 0 || usage) {
           yield {
             delta,
             ...(reasoningDelta ? { reasoningDelta } : {}),
             ...(toolCallDeltas.length > 0 ? { toolCallDeltas } : {}),
             ...(providerToolEvents.length > 0 ? { providerToolEvents } : {}),
+            ...(usage ? { usage } : {}),
           }
         }
       }
