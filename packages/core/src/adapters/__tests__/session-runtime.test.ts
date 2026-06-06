@@ -16,6 +16,7 @@ describe('session-runtime adapters', () => {
     const parsed = sessionSendResultParser.parse(raw);
 
     expect(parsed.content).toBe('done');
+    expect(parsed.usage).toEqual({ promptTokens: 10, completionTokens: 5 });
     expect(parsed.toolCalls).toEqual([
       { id: 't1', name: 'read_file', args: { path: 'a.ts' } },
     ]);

@@ -55,6 +55,40 @@ describe('TurnRunner', () => {
     expect(result.toolCallsExecuted).toBe(1);
   });
 
+  it('聚合 tool loop 内每次 LLM 调用的 usage', async () => {
+    const session = {
+      id: 's1',
+      send: vi
+        .fn()
+        .mockResolvedValueOnce(
+          JSON.stringify({
+            content: null,
+            toolCalls: [{ id: '1', name: 'read', args: {} }],
+            usage: { promptTokens: 10, completionTokens: 2 },
+          }),
+        )
+        .mockResolvedValueOnce(
+          JSON.stringify({
+            content: 'done',
+            toolCalls: [],
+            usage: { promptTokens: 8, completionTokens: 4 },
+          }),
+        ),
+    };
+    const tools = {
+      executeTool: vi.fn().mockResolvedValue({ success: true, data: { ok: true } }),
+    };
+
+    const runner = new TurnRunner(parser);
+    const result = await runner.run(session, 'hello', tools);
+
+    expect(result.usage).toEqual({
+      promptTokens: 18,
+      completionTokens: 6,
+      totalTokens: 24,
+    });
+  });
+
   it('多个 tool call 在同轮内并行执行，但调用顺序保持输入序', async () => {
     const session = {
       id: 's1',

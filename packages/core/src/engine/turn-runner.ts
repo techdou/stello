@@ -80,6 +80,30 @@ export interface ParsedTurnResponse {
   content: string | null;
   /** 需要由 Engine 执行的工具调用 */
   toolCalls: ToolCall[];
+  /** 本次 LLM 调用的 token 用量 */
+  usage?: TurnRunnerUsage;
+}
+
+/** 单次或聚合后的 LLM token 用量 */
+export interface TurnRunnerUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
+function addOptionalNumbers(a: number | undefined, b: number | undefined): number | undefined {
+  return a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+}
+
+function addUsage(current: TurnRunnerUsage | undefined, next: TurnRunnerUsage | undefined): TurnRunnerUsage | undefined {
+  if (!next) return current;
+  const currentTotal = current?.totalTokens ?? ((current?.promptTokens ?? 0) + (current?.completionTokens ?? 0));
+  const nextTotal = next.totalTokens ?? ((next.promptTokens ?? 0) + (next.completionTokens ?? 0));
+  return {
+    promptTokens: addOptionalNumbers(current?.promptTokens, next.promptTokens),
+    completionTokens: addOptionalNumbers(current?.completionTokens, next.completionTokens),
+    totalTokens: currentTotal + nextTotal,
+  };
 }
 
 /** Session 调用的运行时选项 */
@@ -160,6 +184,8 @@ export interface TurnRunnerResult {
   toolCallsExecuted: number;
   /** 原始最终响应 */
   rawResponse: string;
+  /** 本轮内所有 LLM 调用聚合后的 token 用量 */
+  usage?: TurnRunnerUsage;
 }
 
 /** 流式 tool loop 的执行结果 */
@@ -197,11 +223,13 @@ export class TurnRunner {
     let toolRoundCount = 0;
     let toolCallsExecuted = 0;
     let lastRawResponse = '';
+    let usage: TurnRunnerUsage | undefined;
 
     while (true) {
       options.signal?.throwIfAborted();
       lastRawResponse = await session.send(currentInput, { signal: options.signal });
       const parsed = this.parser.parse(lastRawResponse);
+      usage = addUsage(usage, parsed.usage);
 
       if (parsed.toolCalls.length === 0) {
         return {
@@ -209,6 +237,7 @@ export class TurnRunner {
           toolRoundCount,
           toolCallsExecuted,
           rawResponse: lastRawResponse,
+          usage,
         };
       }
 
@@ -290,6 +319,7 @@ export class TurnRunner {
     let lastRawResponse = await rawResult
     options.signal?.throwIfAborted()
     let parsed = this.parser.parse(lastRawResponse)
+    let usage = addUsage(undefined, parsed.usage)
 
     while (parsed.toolCalls.length > 0) {
       if (toolRoundCount >= maxToolRounds) {
@@ -303,6 +333,7 @@ export class TurnRunner {
       options.signal?.throwIfAborted()
       lastRawResponse = await session.send(JSON.stringify({ toolResults }), { signal: options.signal })
       parsed = this.parser.parse(lastRawResponse)
+      usage = addUsage(usage, parsed.usage)
     }
 
     return {
@@ -310,6 +341,7 @@ export class TurnRunner {
       toolRoundCount,
       toolCallsExecuted,
       rawResponse: lastRawResponse,
+      usage,
     }
   }
 }
